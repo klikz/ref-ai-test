@@ -29,8 +29,16 @@ uploads/
 # local dumps / temp SQL
 ac2_for_pg14.sql
 ac2_data_pg14.sql
+dump-ac-*.sql
 *.tmp.sql
 *_pg14.sql
+
+# local data exports / scratch
+*.csv
+ac.txt
+gscode.txt
+output.txt
+utils/_test_label.png
 
 # excel / sample uploads (local)
 *.xlsx
