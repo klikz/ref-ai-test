@@ -1,0 +1,47 @@
+# env / secrets
+.env
+.env.*
+!.env.example
+
+# deps / build
+node_modules/
+ui/node_modules/
+/web/
+web/*
+web/build/
+dist/
+*.exe
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# logs
+*.log
+logger.log
+
+# uploads & local media
+uploads/
+
+# local dumps / temp SQL
+ac2_for_pg14.sql
+ac2_data_pg14.sql
+*.tmp.sql
+*_pg14.sql
+
+# excel / sample uploads (local)
+*.xlsx
+!docs/**/*.xlsx
+
+# UI local test junk
+ui/_test_xlsx/
+ui/_tx/
+ui/_t.zip
+ui/_test.zip
+ui/dist/
+
+# test artifacts
+ui/_test_*.xlsx
