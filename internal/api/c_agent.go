@@ -75,7 +75,7 @@ func (s *ServerModel) agentRunDeployTest(taskID int64) {
 	_, _ = s.Store.Repo().AgentTaskUpdateStatus(
 		taskID,
 		"testing",
-		"Test deploy boshlandi: git/build/pm2...\nappDir="+appDir,
+		"Test deploy boshlandi: build/copy (git skip)...\nappDir="+appDir,
 		"",
 		"",
 	)
@@ -103,6 +103,9 @@ func (s *ServerModel) agentRunDeployTest(taskID int64) {
 		"AGENT_TASK_ID="+strconv.FormatInt(taskID, 10),
 		// Status DB ga yozilguncha process o'lmasin — pm2 ni Go keyin ishga tushiradi.
 		"AGENT_SKIP_PM2=1",
+		// PM2/SYSTEM ostida git osilib qoladi — deployda o'chirilgan.
+		"GIT_TERMINAL_PROMPT=0",
+		"GCM_INTERACTIVE=never",
 	)
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
@@ -272,7 +275,7 @@ func (s *ServerModel) AgentTasksApproveTest(c *gin.Context) {
 	item, err = s.Store.Repo().AgentTaskUpdateStatus(
 		id,
 		"testing",
-		"Test deploy navbatga qo'yildi (git/build/pm2)...",
+		"Test deploy navbatga qo'yildi (build/copy, git skip)...",
 		"",
 		"",
 	)
