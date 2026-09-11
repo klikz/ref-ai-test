@@ -56,7 +56,7 @@ func (r *Repo) AgentTaskHasActive() (bool, error) {
 	err := r.store.db.QueryRow(`
 		SELECT EXISTS (
 			SELECT 1 FROM agent.tasks
-			WHERE status IN ('queued', 'running', 'testing')
+			WHERE status IN ('queued', 'running', 'testing', 'promoting')
 		)
 	`).Scan(&exists)
 	return exists, err

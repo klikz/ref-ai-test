@@ -286,6 +286,115 @@ func (s *ServerModel) AgentTasksApproveTest(c *gin.Context) {
 	s.Utils.SendOK(c, item)
 }
 
+func (s *ServerModel) agentRunDeployProd(taskID int64) {
+	appDir := agentAppDir()
+	script := filepath.Join(appDir, "scripts", "agent-deploy-prod.ps1")
+	testDir := strings.TrimSpace(os.Getenv("REF_AI_TEST_DIR"))
+	if testDir == "" {
+		testDir = "D:\\ref-main\\ref-ai\\ref-ai-test"
+	}
+	prodDir := strings.TrimSpace(os.Getenv("REF_AI_PROD_DIR"))
+	if prodDir == "" {
+		prodDir = "D:\\ref-main\\ref-ai\\ref-ai-prod"
+	}
+
+	_, _ = s.Store.Repo().AgentTaskUpdateStatus(
+		taskID,
+		"promoting",
+		"Prod deploy: test artifaktlari → "+prodDir,
+		"",
+		"",
+	)
+
+	if _, err := os.Stat(script); err != nil {
+		_, _ = s.Store.Repo().AgentTaskUpdateStatus(
+			taskID,
+			"ready_for_prod",
+			"",
+			"prod deploy script topilmadi: "+script,
+			"",
+		)
+		return
+	}
+
+	cmd := exec.Command(
+		"powershell.exe",
+		"-NoProfile",
+		"-ExecutionPolicy", "Bypass",
+		"-File", script,
+	)
+	cmd.Dir = appDir
+	cmd.Env = append(os.Environ(),
+		"AGENT_APP_DIR="+appDir,
+		"AGENT_TASK_ID="+strconv.FormatInt(taskID, 10),
+		"REF_AI_TEST_DIR="+testDir,
+		"REF_AI_PROD_DIR="+prodDir,
+		"AGENT_SKIP_PM2=1",
+	)
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+
+	err := cmd.Run()
+	out := buf.String()
+	if len(out) > 6000 {
+		out = out[len(out)-6000:]
+	}
+	if err != nil {
+		_, _ = s.Store.Repo().AgentTaskUpdateStatus(
+			taskID,
+			"ready_for_prod",
+			out,
+			"Prod deploy xato: "+err.Error(),
+			"",
+		)
+		return
+	}
+
+	pm2Name := strings.TrimSpace(os.Getenv("PM2_PROD_NAME"))
+	if pm2Name == "" {
+		pm2Name = "ref-ai-prod"
+	}
+
+	_, _ = s.Store.Repo().AgentTaskUpdateStatus(
+		taskID,
+		"promoted",
+		"Prod deploy OK (pm2...).\n"+out,
+		"",
+		"",
+	)
+
+	// Prefer restart; if app missing, start from ecosystem in prod dir.
+	pm2Out, pm2Err := exec.Command("pm2", "restart", pm2Name, "--update-env").CombinedOutput()
+	if pm2Err != nil {
+		eco := filepath.Join(prodDir, "ecosystem.config.cjs")
+		start := exec.Command("pm2", "start", eco)
+		start.Dir = prodDir
+		startOut, startErr := start.CombinedOutput()
+		msg := out + "\npm2 restart:\n" + string(pm2Out) + "\npm2 start:\n" + string(startOut)
+		if len(msg) > 6000 {
+			msg = msg[len(msg)-6000:]
+		}
+		if startErr != nil {
+			_, _ = s.Store.Repo().AgentTaskUpdateStatus(
+				taskID,
+				"ready_for_prod",
+				msg,
+				"Copy OK, lekin pm2 start/restart xato: "+startErr.Error(),
+				"",
+			)
+			return
+		}
+		_, _ = s.Store.Repo().AgentTaskUpdateStatus(
+			taskID,
+			"promoted",
+			"Prod deploy OK (pm2 start).\n"+msg,
+			"",
+			"",
+		)
+	}
+}
+
 func (s *ServerModel) AgentTasksApproveProd(c *gin.Context) {
 	if !s.agentRequireOwner(c) {
 		return
@@ -311,15 +420,18 @@ func (s *ServerModel) AgentTasksApproveProd(c *gin.Context) {
 	}
 	item, err = s.Store.Repo().AgentTaskUpdateStatus(
 		id,
-		"promoted",
-		"Prod tasdiqlandi. Serverda promote-to-prod.ps1 / ref-ai-prod update qiling.",
+		"promoting",
+		"Prod deploy navbatga qo'yildi (copy test → ref-ai-prod)...",
 		"",
 		"",
 	)
 	if err != nil {
-		s.Utils.SendError(c, err, "AgentTasksApproveProd", "")
+		s.Utils.SendError(c, err, "AgentTasksApproveProd: promoting", "")
 		return
 	}
+
+	go s.agentRunDeployProd(id)
+
 	s.Utils.SendOK(c, item)
 }
 

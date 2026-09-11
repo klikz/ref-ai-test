@@ -77,7 +77,11 @@ export default function AgentPage() {
 
   useEffect(() => {
     const active = tasks.some(
-      (t) => t.status === "queued" || t.status === "running" || t.status === "testing",
+      (t) =>
+        t.status === "queued" ||
+        t.status === "running" ||
+        t.status === "testing" ||
+        t.status === "promoting",
     )
     if (!active || allowed !== true) return
     const timer = window.setInterval(() => {
@@ -122,7 +126,7 @@ export default function AgentPage() {
       ShowErrorToast(result.error || "Prod tasdiqlanmadi")
       return
     }
-    ShowOKToast("Prodga chiqarish tasdiqlandi")
+    ShowOKToast("Prod deploy boshlandi (copy/pm2)")
     await loadTasks()
   }
 
@@ -247,7 +251,13 @@ export default function AgentPage() {
                           {task.status === "testing" && (
                             <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
                               <Loader2 className="size-3.5 animate-spin" />
-                              Deploy...
+                              Test deploy...
+                            </span>
+                          )}
+                          {task.status === "promoting" && (
+                            <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                              <Loader2 className="size-3.5 animate-spin" />
+                              Prod deploy...
                             </span>
                           )}
                           {(task.status === "ready_for_test" || task.status === "failed") && (
@@ -298,7 +308,7 @@ export default function AgentPage() {
               <Bot className="mr-1 inline size-3.5" />
               Testga — avtomatik: git/build/copy/pm2 restart.
             </li>
-            <li>Test OK bo'lsa — Prodga tasdiqlang.</li>
+            <li>Test OK bo'lsa — Prodga: test binary/UI → ref-ai-prod + pm2.</li>
           </ol>
         </Panel>
       </div>
