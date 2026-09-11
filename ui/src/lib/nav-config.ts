@@ -23,6 +23,8 @@ import {
   Users,
   UserCheck,
   Warehouse,
+  Ruler,
+  Camera,
 } from "lucide-react"
 
 export type NavItem = {
@@ -62,9 +64,9 @@ export const navSections: NavSection[] = [
   {
     label: "Liniyalar",
     items: [
-      { title: "Yi'g'ish liniyasi", href: "/yigish", icon: Factory, description: "Rejadagi modeldan serial chop etish" },
-      { title: "Eshik liniyasi", href: "/eshik", icon: Factory, description: "Rejadagi komponentdan serial chop etish" },
-      { title: "Qadoqlash Liniyasi", href: "/qadoqlash", icon: Factory, description: "Lab + acc/eshik/product skan va chop" },
+      { title: "Eshik yig'uv va eshikka PPU quyish uchastkasi", href: "/eshik", icon: Factory, description: "Rejadagi modeldan freeze+ref serial chop etish" },
+      { title: "Boshlang'ich yig'uv uchastkasi", href: "/yigish", icon: Factory, description: "Rejadagi modeldan serial chop etish" },
+      { title: "Yakuniy yig'uv uchastkasi", href: "/qadoqlash", icon: Factory, description: "Lab + acc/eshik/product skan va chop" },
       { title: "Brigadir", href: "/brigadir", icon: UserCheck, description: "Liniya komponentlarini qabul qilish" },
     ],
   },
@@ -73,10 +75,8 @@ export const navSections: NavSection[] = [
     items: [
       { title: "Modellar", href: "/models", icon: Package },
       { title: "Components", href: "/production/components", icon: Layers },
-      { title: "Eshik komponentlari", href: "/production/eshik", icon: Layers, description: "Eshik liniyasi komponentlari va serial prefix" },
+      { title: "Eshik modellari", href: "/production/eshik", icon: Layers, description: "Eshik model nomi, freeze/ref prefix va komponent" },
       { title: "Sarf normasi", href: "/production/consumption-norm", icon: ClipboardList },
-      { title: "Liniya mas'ullari", href: "/production/line-responsibles", icon: UserCog },
-      { title: "Hisobdan chiqarish mas'ullari", href: "/writeoff/responsibles", icon: UserCog, description: "Barcha mas'ullar tasdiqlashi shart" },
       { title: "GS Code", href: "/gscode", icon: QrCode },
       { title: "Printerlar", href: "/printers-v2", icon: Printer, description: "Liniya printerlari" },
       { title: "Etiketkalar", href: "/label-templates", icon: Tag, description: "Etiketka shablonlari" },
@@ -84,6 +84,20 @@ export const navSections: NavSection[] = [
       { title: "Smena vaqtlari", href: "/production/shifts", icon: Clock, description: "1-sm va 2-sm boshlanish/tugash" },
       { title: "Reja dashboard", href: "/production/plan/dashboard", icon: Monitor, description: "Reja bajarilishi" },
       { title: "Qayta chop", href: "/reprint", icon: RefreshCw },
+    ],
+  },
+  {
+    label: "Tools",
+    items: [
+      { title: "Liniya mas'ullari", href: "/tools/line-responsibles", icon: UserCog },
+      {
+        title: "Hisobdan chiqarish mas'ullari",
+        href: "/tools/writeoff-responsibles",
+        icon: UserCheck,
+        description: "Barcha mas'ullar tasdiqlashi shart",
+      },
+      { title: "O'lchov birliklari", href: "/tools/measurement-units", icon: Ruler, description: "Faqat ko'rish" },
+      { title: "Camera Test", href: "/tools/camera-test", icon: Camera, description: "Jonli kamera ko'rinishi" },
     ],
   },
   {
@@ -108,7 +122,7 @@ export const navSections: NavSection[] = [
 ]
 
 export const homeQuickLinks: NavItem[] = [
-  { title: "Yi'g'ish liniyasi", href: "/yigish", icon: Factory, description: "Serial chop etish" },
+  { title: "Boshlang'ich yig'uv uchastkasi", href: "/yigish", icon: Factory, description: "Serial chop etish" },
   { title: "Modellar", href: "/models", icon: Package, description: "Katalog" },
   { title: "Components", href: "/production/components", icon: Layers, description: "Ishlab chiqarish komponentlari" },
   { title: "GS Code", href: "/gscode", icon: QrCode, description: "Yuklash" },

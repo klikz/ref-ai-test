@@ -1,4 +1,11 @@
-import { formatLabelDate, isTodayBinding, TODAY_BINDING } from "@/lib/label-date-format"
+import {
+  formatLabelDate,
+  isNowBinding,
+  isTodayBinding,
+  NOW_BINDING,
+  NOW_DATE_FORMAT,
+  TODAY_BINDING,
+} from "@/lib/label-date-format"
 import { generateSerial } from "@/lib/generate-serial"
 
 export const GSCODE_DATA38_BINDING = "gscode.data38"
@@ -26,6 +33,7 @@ export function isGS1Data38Binding(binding?: string): boolean {
 export function isDerivedBinding(binding?: string): boolean {
   return (
     isTodayBinding(binding) ||
+    isNowBinding(binding) ||
     isGS1Data38Binding(binding) ||
     isRadiatorSerialBinding(binding) ||
     isKlapanSerialBinding(binding) ||
@@ -59,6 +67,9 @@ export function resolveDerivedBinding(
   }
   if (isTodayBinding(binding)) {
     return formatLabelDate(new Date(), dateFormat)
+  }
+  if (isNowBinding(binding)) {
+    return formatLabelDate(new Date(), NOW_DATE_FORMAT)
   }
   if (isGS1Data38Binding(binding)) {
     return resolveGS1Data38FromData(data)
@@ -99,4 +110,4 @@ export function resolveDerivedBinding(
   return ""
 }
 
-export { TODAY_BINDING }
+export { TODAY_BINDING, NOW_BINDING, NOW_DATE_FORMAT }

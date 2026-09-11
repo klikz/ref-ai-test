@@ -86,7 +86,7 @@ type Lines struct {
 func (r *Repo) LinesGetAll() ([]Lines, error) {
 	rows, err := r.store.db.Query(`select ll.line_id, ll."name" from lines.lines_list ll 
 		where ll.status = true
-		order by ll."name" `)
+		order by ll.sort_order, ll."name" `)
 	if err != nil {
 		return nil, err
 	}
@@ -610,8 +610,9 @@ func (r *Repo) PrinterInfoById(printer_id int) (LinePrinters, error) {
 const FinPressLineID = 8
 const RadiatorLineID = 9
 const KlapanLineID = 10
-const EshikLineID = 11
+const EshikLineID = 20
 const QadoqlashLineID = 12
+const YigishLineID = 1
 
 func (r *Repo) LinesEshikLineID() (int, error) {
 	var ok int
@@ -623,7 +624,7 @@ func (r *Repo) LinesEshikLineID() (int, error) {
 	).Scan(&ok)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return 0, errors.New("eshik liniyasi topilmadi (line_id=11)")
+			return 0, errors.New("eshik liniyasi topilmadi (line_id=20)")
 		}
 		return 0, err
 	}

@@ -142,7 +142,7 @@ async function buildIncomeDetailWorkbook(params: {
 }) {
   const ExcelJS = await import("exceljs")
   const workbook = new ExcelJS.Workbook()
-  workbook.creator = "Premier AC"
+  workbook.creator = "Premier REF"
   workbook.created = new Date()
 
   const sheet = workbook.addWorksheet("Kirim tranzaksiyalari")

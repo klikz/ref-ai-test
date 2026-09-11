@@ -342,11 +342,15 @@ func (r *Repo) ModelsAdd(model models.ModelInfo, user_id int) error {
 		netto, brutto, qadoq_hajmi, mahsulot_hajmi, iqlim_sharoitlari,
 		elektr_toki_kuchlanishi_va_turi, yoritgich_lampaning_quvvati_vt, umumiy_hajmi_l,
 		sovutgich_kamera_hajmi_l, muzlatgich_kamera_hajmi_l, muzlatish_quvvati,
-		nominal_tok_quvvati_w, freon, shovqin_darajasi_db, odoo_code, door_code,
-		compressor_serial, comment, c_user_id
+		nominal_tok_quvvati_w, nominal_tok_kuchi_a, freon, shovqin_darajasi_db, odoo_code, door_code,
+		freeze_door_code, ref_door_code,
+		compressor_serial, comment,
+		eshik_rangi, rangi_eng, korpus_rangi_shortname, eshik_rangi_shortname, rangi_kodi, manzil_ru,
+		c_user_id
 	) VALUES (
 		$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
-		$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40
+		$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,
+		$40,$41,$42,$43,$44,$45,$46,$47,$48,$49
 	)`,
 		model.Seriya_raqami, model.Acc_serial, model.Modeli, model.Sovutgich_turi, model.Qisqa_nomi, model.Rangi, model.Sotuv_turi,
 		model.GS1_EAN13, model.GOST, model.Taminot_kuchlanishi_v, model.Xladagent_miqdori_g, model.Energiya_samaradorlik_sarfi,
@@ -355,8 +359,11 @@ func (r *Repo) ModelsAdd(model models.ModelInfo, user_id int) error {
 		model.Netto, model.Brutto, model.Qadoq_hajmi, model.Mahsulot_hajmi, model.Iqlim_sharoitlari,
 		model.Elektr_toki_kuchlanishi_va_turi, model.Yoritgich_lampaning_quvvati_vt, model.Umumiy_hajmi_l,
 		model.Sovutgich_kamera_hajmi_l, model.Muzlatgich_kamera_hajmi_l, model.Muzlatish_quvvati,
-		model.Nominal_tok_quvvati_w, model.Freon, model.Shovqin_darajasi_db, model.OdooCode, model.Door_code,
-		model.Compressor_serial, model.Comment, user_id)
+		model.Nominal_tok_quvvati_w, model.Nominal_tok_kuchi_a, model.Freon, model.Shovqin_darajasi_db, model.OdooCode, model.Freeze_door_code,
+		model.Freeze_door_code, model.Ref_door_code,
+		model.Compressor_serial, model.Comment,
+		model.EshikRangi, model.RangiEng, model.KorpusRangiShortname, model.EshikRangiShortname, model.RangiKodi, model.ManzilRu,
+		user_id)
 
 	if err != nil {
 		return err
@@ -424,7 +431,6 @@ func (r *Repo) modelLookupKeys(model models.ModelInfo) []struct {
 		{column: "odoo_code", value: strings.TrimSpace(model.OdooCode)},
 		{column: "seriya_raqami", value: strings.TrimSpace(model.Seriya_raqami)},
 		{column: "gs1_ean13", value: strings.TrimSpace(model.GS1_EAN13)},
-		{column: "door_code", value: NormalizeModelDoorCodeStorage(model.Door_code)},
 	}
 }
 
@@ -451,13 +457,13 @@ func (r *Repo) ModelsFindDuplicateKey(model models.ModelInfo) (int, string, stri
 	if err != nil || id == 0 {
 		return 0, "", "", err
 	}
-	var odooCode, seriya, ean13, doorCode string
+	var odooCode, seriya, ean13 string
 	err = r.store.db.QueryRow(`
 		SELECT COALESCE(odoo_code, ''), COALESCE(seriya_raqami, ''),
-			COALESCE(gs1_ean13, ''), COALESCE(door_code, '')
+			COALESCE(gs1_ean13, '')
 		FROM production.models
 		WHERE id = $1 AND deleted = false`, id,
-	).Scan(&odooCode, &seriya, &ean13, &doorCode)
+	).Scan(&odooCode, &seriya, &ean13)
 	if err != nil {
 		return 0, "", "", err
 	}
@@ -465,7 +471,6 @@ func (r *Repo) ModelsFindDuplicateKey(model models.ModelInfo) (int, string, stri
 		"odoo_code":     odooCode,
 		"seriya_raqami": seriya,
 		"gs1_ean13":     ean13,
-		"door_code":     doorCode,
 	}
 	for _, key := range r.modelLookupKeys(model) {
 		if key.value != "" && stored[key.column] == key.value {
@@ -499,8 +504,11 @@ func (r *Repo) ModelsGetAll() ([]models.ModelInfo, error) {
 	m.netto, m.brutto, m.qadoq_hajmi, m.mahsulot_hajmi, m.iqlim_sharoitlari,
 	m.elektr_toki_kuchlanishi_va_turi, m.yoritgich_lampaning_quvvati_vt, m.umumiy_hajmi_l,
 	m.sovutgich_kamera_hajmi_l, m.muzlatgich_kamera_hajmi_l, m.muzlatish_quvvati,
-	m.nominal_tok_quvvati_w, m.freon, m.shovqin_darajasi_db, m.odoo_code, m.door_code,
-	m.compressor_serial, m.comment, m.status, COUNT(gs.id) AS gscode_count
+	m.nominal_tok_quvvati_w, m.nominal_tok_kuchi_a, m.freon, m.shovqin_darajasi_db, m.odoo_code, m.door_code,
+	COALESCE(m.freeze_door_code, ''), COALESCE(m.ref_door_code, ''),
+	m.compressor_serial, m.comment,
+	m.eshik_rangi, m.rangi_eng, m.korpus_rangi_shortname, m.eshik_rangi_shortname, m.rangi_kodi, m.manzil_ru,
+	m.status, COUNT(gs.id) AS gscode_count
 	FROM production.models m
 	LEFT JOIN production.gscodes gs ON gs.model_id = m.id AND gs.status
 	WHERE m.deleted = false
@@ -522,10 +530,19 @@ func (r *Repo) ModelsGetAll() ([]models.ModelInfo, error) {
 			&comp.Netto, &comp.Brutto, &comp.Qadoq_hajmi, &comp.Mahsulot_hajmi, &comp.Iqlim_sharoitlari,
 			&comp.Elektr_toki_kuchlanishi_va_turi, &comp.Yoritgich_lampaning_quvvati_vt, &comp.Umumiy_hajmi_l,
 			&comp.Sovutgich_kamera_hajmi_l, &comp.Muzlatgich_kamera_hajmi_l, &comp.Muzlatish_quvvati,
-			&comp.Nominal_tok_quvvati_w, &comp.Freon, &comp.Shovqin_darajasi_db, &comp.OdooCode, &comp.Door_code,
-			&comp.Compressor_serial, &comp.Comment, &comp.Status, &comp.GsCodeCount,
+			&comp.Nominal_tok_quvvati_w, &comp.Nominal_tok_kuchi_a, &comp.Freon, &comp.Shovqin_darajasi_db, &comp.OdooCode, &comp.Door_code,
+			&comp.Freeze_door_code, &comp.Ref_door_code,
+			&comp.Compressor_serial, &comp.Comment,
+			&comp.EshikRangi, &comp.RangiEng, &comp.KorpusRangiShortname, &comp.EshikRangiShortname, &comp.RangiKodi, &comp.ManzilRu,
+			&comp.Status, &comp.GsCodeCount,
 		); err != nil {
 			return allData, err
+		}
+		if strings.TrimSpace(comp.Freeze_door_code) == "" {
+			comp.Freeze_door_code = comp.Door_code
+		}
+		if strings.TrimSpace(comp.Ref_door_code) == "" {
+			comp.Ref_door_code = comp.Door_code
 		}
 		allData = append(allData, comp)
 	}
@@ -547,8 +564,11 @@ func (r *Repo) ModelsGetByID(modelID int) (models.ModelInfo, error) {
 	m.netto, m.brutto, m.qadoq_hajmi, m.mahsulot_hajmi, m.iqlim_sharoitlari,
 	m.elektr_toki_kuchlanishi_va_turi, m.yoritgich_lampaning_quvvati_vt, m.umumiy_hajmi_l,
 	m.sovutgich_kamera_hajmi_l, m.muzlatgich_kamera_hajmi_l, m.muzlatish_quvvati,
-	m.nominal_tok_quvvati_w, m.freon, m.shovqin_darajasi_db, m.odoo_code, m.door_code,
-	m.compressor_serial, m.comment, m.status, COUNT(gs.id) AS gscode_count
+	m.nominal_tok_quvvati_w, m.nominal_tok_kuchi_a, m.freon, m.shovqin_darajasi_db, m.odoo_code, m.door_code,
+	COALESCE(m.freeze_door_code, ''), COALESCE(m.ref_door_code, ''),
+	m.compressor_serial, m.comment,
+	m.eshik_rangi, m.rangi_eng, m.korpus_rangi_shortname, m.eshik_rangi_shortname, m.rangi_kodi, m.manzil_ru,
+	m.status, COUNT(gs.id) AS gscode_count
 	FROM production.models m
 	LEFT JOIN production.gscodes gs ON gs.model_id = m.id AND gs.status
 	WHERE m.deleted = false AND m.id = $1
@@ -560,13 +580,25 @@ func (r *Repo) ModelsGetByID(modelID int) (models.ModelInfo, error) {
 		&comp.Netto, &comp.Brutto, &comp.Qadoq_hajmi, &comp.Mahsulot_hajmi, &comp.Iqlim_sharoitlari,
 		&comp.Elektr_toki_kuchlanishi_va_turi, &comp.Yoritgich_lampaning_quvvati_vt, &comp.Umumiy_hajmi_l,
 		&comp.Sovutgich_kamera_hajmi_l, &comp.Muzlatgich_kamera_hajmi_l, &comp.Muzlatish_quvvati,
-		&comp.Nominal_tok_quvvati_w, &comp.Freon, &comp.Shovqin_darajasi_db, &comp.OdooCode, &comp.Door_code,
-		&comp.Compressor_serial, &comp.Comment, &comp.Status, &comp.GsCodeCount,
+		&comp.Nominal_tok_quvvati_w, &comp.Nominal_tok_kuchi_a, &comp.Freon, &comp.Shovqin_darajasi_db, &comp.OdooCode, &comp.Door_code,
+		&comp.Freeze_door_code, &comp.Ref_door_code,
+		&comp.Compressor_serial, &comp.Comment,
+		&comp.EshikRangi, &comp.RangiEng, &comp.KorpusRangiShortname, &comp.EshikRangiShortname, &comp.RangiKodi, &comp.ManzilRu,
+		&comp.Status, &comp.GsCodeCount,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return comp, nil
 	}
-	return comp, err
+	if err != nil {
+		return comp, err
+	}
+	if strings.TrimSpace(comp.Freeze_door_code) == "" {
+		comp.Freeze_door_code = comp.Door_code
+	}
+	if strings.TrimSpace(comp.Ref_door_code) == "" {
+		comp.Ref_door_code = comp.Door_code
+	}
+	return comp, nil
 }
 
 func (r *Repo) ModelsUpdate(model models.ModelInfo, user_id int) error {
@@ -587,9 +619,12 @@ func (r *Repo) ModelsUpdate(model models.ModelInfo, user_id int) error {
 		netto=$22, brutto=$23, qadoq_hajmi=$24, mahsulot_hajmi=$25, iqlim_sharoitlari=$26,
 		elektr_toki_kuchlanishi_va_turi=$27, yoritgich_lampaning_quvvati_vt=$28, umumiy_hajmi_l=$29,
 		sovutgich_kamera_hajmi_l=$30, muzlatgich_kamera_hajmi_l=$31, muzlatish_quvvati=$32,
-		nominal_tok_quvvati_w=$33, freon=$34, shovqin_darajasi_db=$35, odoo_code=$36, door_code=$37,
-		compressor_serial=$38, comment=$39, u_user_id=$40, u_time=now()
-	WHERE id=$41`,
+		nominal_tok_quvvati_w=$33, nominal_tok_kuchi_a=$34, freon=$35, shovqin_darajasi_db=$36, odoo_code=$37, door_code=$38,
+		freeze_door_code=$39, ref_door_code=$40,
+		compressor_serial=$41, comment=$42,
+		eshik_rangi=$43, rangi_eng=$44, korpus_rangi_shortname=$45, eshik_rangi_shortname=$46, rangi_kodi=$47, manzil_ru=$48,
+		u_user_id=$49, u_time=now()
+	WHERE id=$50`,
 		model.Seriya_raqami, model.Acc_serial, model.Modeli, model.Sovutgich_turi, model.Qisqa_nomi, model.Rangi, model.Sotuv_turi,
 		model.GS1_EAN13, model.GOST, model.Taminot_kuchlanishi_v, model.Xladagent_miqdori_g, model.Energiya_samaradorlik_sarfi,
 		model.Kompressor_nomi, model.Maxalliy_sertifikat, model.EAC_Sertifikati, model.CE_Sertifikat,
@@ -597,8 +632,11 @@ func (r *Repo) ModelsUpdate(model models.ModelInfo, user_id int) error {
 		model.Netto, model.Brutto, model.Qadoq_hajmi, model.Mahsulot_hajmi, model.Iqlim_sharoitlari,
 		model.Elektr_toki_kuchlanishi_va_turi, model.Yoritgich_lampaning_quvvati_vt, model.Umumiy_hajmi_l,
 		model.Sovutgich_kamera_hajmi_l, model.Muzlatgich_kamera_hajmi_l, model.Muzlatish_quvvati,
-		model.Nominal_tok_quvvati_w, model.Freon, model.Shovqin_darajasi_db, model.OdooCode, model.Door_code,
-		model.Compressor_serial, model.Comment, user_id, model.ID)
+		model.Nominal_tok_quvvati_w, model.Nominal_tok_kuchi_a, model.Freon, model.Shovqin_darajasi_db, model.OdooCode, model.Freeze_door_code,
+		model.Freeze_door_code, model.Ref_door_code,
+		model.Compressor_serial, model.Comment,
+		model.EshikRangi, model.RangiEng, model.KorpusRangiShortname, model.EshikRangiShortname, model.RangiKodi, model.ManzilRu,
+		user_id, model.ID)
 	if err != nil {
 		return err
 	}
@@ -859,7 +897,9 @@ type ModelShortInfo struct {
 	SeriyaRaqami     string `json:"seriya_raqami"`
 	AccSerial        string `json:"acc_serial"`
 	CompressorSerial string `json:"compressor_serial"`
-	DoorCode         string `json:"door_code"`
+	DoorCode         string `json:"door_code"` // legacy alias of freeze
+	FreezeDoorCode   string `json:"freeze_door_code"`
+	RefDoorCode      string `json:"ref_door_code"`
 	QisqaNomi        string `json:"qisqa_nomi"`
 	GS1EAN13         string `json:"gs1_ean13"`
 }
@@ -879,11 +919,17 @@ func (r *Repo) ModelsShortInfoBySerialPrefix(serial string, prefixLen int) (Mode
 	croppedSerial := serial[:prefixLen]
 	modelInfo := ModelShortInfo{}
 
-	err := r.store.db.QueryRow(`select m.id, COALESCE(m.qisqa_nomi, ''), m.modeli, COALESCE(m.gs1_ean13, ''), COALESCE(m.door_code, ''), m.seriya_raqami,
+	err := r.store.db.QueryRow(`select m.id, COALESCE(m.qisqa_nomi, ''), m.modeli, COALESCE(m.gs1_ean13, ''),
+								COALESCE(NULLIF(m.freeze_door_code, ''), m.door_code, ''),
+								COALESCE(NULLIF(m.ref_door_code, ''), m.door_code, ''),
+								m.seriya_raqami,
 								COALESCE(m.acc_serial, ''), COALESCE(m.compressor_serial, '')
 								from production.models m 
-								where m.status = true and m.seriya_raqami = $1`, croppedSerial).Scan(&modelInfo.ModelId,
-		&modelInfo.QisqaNomi, &modelInfo.ModelName, &modelInfo.GS1EAN13, &modelInfo.DoorCode, &modelInfo.SeriyaRaqami, &modelInfo.AccSerial,
+								where m.status = true and m.seriya_raqami = $1`, croppedSerial).Scan(
+		&modelInfo.ModelId,
+		&modelInfo.QisqaNomi, &modelInfo.ModelName, &modelInfo.GS1EAN13,
+		&modelInfo.FreezeDoorCode, &modelInfo.RefDoorCode,
+		&modelInfo.SeriyaRaqami, &modelInfo.AccSerial,
 		&modelInfo.CompressorSerial)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -893,7 +939,8 @@ func (r *Repo) ModelsShortInfoBySerialPrefix(serial string, prefixLen int) (Mode
 	}
 	modelInfo.ArtikulRaqami = modelInfo.QisqaNomi
 	modelInfo.Gs1Shablon = modelInfo.GS1EAN13
-	modelInfo.ImportCode = modelInfo.DoorCode
+	modelInfo.DoorCode = modelInfo.FreezeDoorCode
+	modelInfo.ImportCode = modelInfo.FreezeDoorCode
 	return modelInfo, nil
 }
 

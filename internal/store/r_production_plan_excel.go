@@ -317,14 +317,20 @@ func (r *Repo) fillPlanDataRow(
 		_ = f.SetCellStyle(sheet, s1PlanCol+strconv.Itoa(row), s1PlanCol+strconv.Itoa(row), styles.rejaCell)
 		_ = f.SetCellStyle(sheet, s2PlanCol+strconv.Itoa(row), s2PlanCol+strconv.Itoa(row), styles.rejaCell)
 		if includeActual {
-			modelID, componentID := 0, 0
-			if IsProductionPlanProductLine(lineID) {
-				modelID = itemKey
-			} else {
-				componentID = itemKey
-			}
 			for _, shiftNo := range []int{1, 2} {
-				actual, err := r.ProductionPlanActualQty(dateStr, lineID, shiftNo, modelID, componentID)
+				actual := 0
+				var err error
+				if lineID == EshikLineID {
+					actual, err = r.ProductionPlanEshikPairActualQty(dateStr, shiftNo, itemKey)
+				} else {
+					modelID, componentID := 0, 0
+					if IsProductionPlanProductLine(lineID) {
+						modelID = itemKey
+					} else {
+						componentID = itemKey
+					}
+					actual, err = r.ProductionPlanActualQty(dateStr, lineID, shiftNo, modelID, componentID)
+				}
 				if err != nil {
 					return err
 				}
@@ -389,11 +395,10 @@ func (r *Repo) productionPlanResolveLabel(lineID int, label string) (int, error)
 			[]any{label}, "komponent", label)
 	case EshikLineID:
 		return r.productionPlanResolveUniqueID(`
-			SELECT c.id
-			FROM production.eshik_components ec
-			INNER JOIN production.components c ON c.id = ec.component_id
-			WHERE c.status = true AND LOWER(TRIM(COALESCE(NULLIF(c.factory_code, ''), c.manufacturer_code, ''))) = LOWER($1)`,
-			[]any{label}, "komponent", label)
+			SELECT m.id
+			FROM production.eshik_models m
+			WHERE LOWER(TRIM(m.model_name)) = LOWER($1)`,
+			[]any{label}, "model", label)
 	default:
 		return 0, fmt.Errorf("noto'g'ri line_id: %d", lineID)
 	}

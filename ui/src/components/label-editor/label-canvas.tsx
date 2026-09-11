@@ -1,19 +1,26 @@
-import { useCallback, useEffect, useRef, useState } from "react"
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ImagePlus, Move, ZoomIn, ZoomOut } from "lucide-react"
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react"
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ImagePlus, Minus, Move, Plus, ZoomIn, ZoomOut } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { getBindingLabel } from "@/lib/label-bindings"
 import { pickImageFile, labelAssetUrl } from "@/lib/label-image"
 import { LABEL_SAMPLE_DATA, type LabelSampleData, resolveElementText } from "@/lib/label-sample-data"
-import type { LabelElement, LabelElementType, LabelTableCell, LabelTemplate } from "@/lib/label-types"
+import type { LabelElement, LabelElementType, LabelResizeHandle, LabelTableCell, LabelTemplate } from "@/lib/label-types"
 import {
+  expandSelectionWithGroups,
   inferDataSource,
   inferTableCellDataSource,
-  isLabelElementType,
+  isLabelCornerResizeHandle,
+  isLabelPaletteDropType,
   labelFontFamilyCss,
+  normalizeElementRotationDeg,
   normalizeTableColWidths,
+  placeBoxKeepingCenter,
+  resizeLabelElementBox,
+  screenDeltaToLocalElementDelta,
   LABEL_ELEMENT_DRAG_MIME,
+  LABEL_ELEMENT_SCALE_STEP,
   LABEL_ZOOM_MAX,
   LABEL_ZOOM_MIN,
   LABEL_ZOOM_STEP,
@@ -26,15 +33,36 @@ type DragOverKind = "image" | "element" | null
 
 type LabelCanvasProps = {
   template: Pick<LabelTemplate, "width_mm" | "height_mm" | "definition">
-  selectedId: string | null
-  onSelect: (id: string | null) => void
+  selectedIds: string[]
+  onSelectIds: (ids: string[]) => void
+  onApplyDragFromOrigins: (
+    origins: Record<string, { x: number; y: number }>,
+    dx: number,
+    dy: number,
+  ) => void
   onUpdateElement: (element: LabelElement) => void
   onOffsetAllElements?: (dx: number, dy: number) => void
+  onScaleAllElements?: (factor: number) => void
   onImageDrop?: (file: File, xMm: number, yMm: number) => void
-  onElementDrop?: (type: LabelElementType, xMm: number, yMm: number) => void
+  onElementDrop?: (type: LabelElementType | "vline", xMm: number, yMm: number) => void
   preview?: boolean
   sampleData?: LabelSampleData
 }
+
+const RESIZE_HANDLES: {
+  id: LabelResizeHandle
+  cursor: string
+  style: CSSProperties
+}[] = [
+  { id: "nw", cursor: "nwse-resize", style: { left: 0, top: 0, transform: "translate(-50%, -50%)" } },
+  { id: "n", cursor: "ns-resize", style: { left: "50%", top: 0, transform: "translate(-50%, -50%)" } },
+  { id: "ne", cursor: "nesw-resize", style: { right: 0, top: 0, transform: "translate(50%, -50%)" } },
+  { id: "e", cursor: "ew-resize", style: { right: 0, top: "50%", transform: "translate(50%, -50%)" } },
+  { id: "se", cursor: "nwse-resize", style: { right: 0, bottom: 0, transform: "translate(50%, 50%)" } },
+  { id: "s", cursor: "ns-resize", style: { left: "50%", bottom: 0, transform: "translate(-50%, 50%)" } },
+  { id: "sw", cursor: "nesw-resize", style: { left: 0, bottom: 0, transform: "translate(-50%, 50%)" } },
+  { id: "w", cursor: "ew-resize", style: { left: 0, top: "50%", transform: "translate(-50%, -50%)" } },
+]
 
 function clampZoom(value: number): number {
   return Math.min(LABEL_ZOOM_MAX, Math.max(LABEL_ZOOM_MIN, Math.round(value * 100) / 100))
@@ -58,10 +86,12 @@ function sortElementsForRender(elements: LabelElement[]): LabelElement[] {
 
 export function LabelCanvas({
   template,
-  selectedId,
-  onSelect,
+  selectedIds,
+  onSelectIds,
+  onApplyDragFromOrigins,
   onUpdateElement,
   onOffsetAllElements,
+  onScaleAllElements,
   onImageDrop,
   onElementDrop,
   preview = true,
@@ -72,12 +102,21 @@ export function LabelCanvas({
   const [dragOver, setDragOver] = useState<DragOverKind>(null)
   const [zoom, setZoom] = useState(1)
 
+  const selectedSet = useRef(new Set(selectedIds))
+  selectedSet.current = new Set(selectedIds)
+
   const dragRef = useRef<{
-    id: string
     startX: number
     startY: number
-    origX: number
-    origY: number
+    origins: Record<string, { x: number; y: number }>
+  } | null>(null)
+
+  const resizeRef = useRef<{
+    id: string
+    handle: LabelResizeHandle
+    startX: number
+    startY: number
+    origin: { x: number; y: number; width: number; height: number }
   } | null>(null)
 
   const groupDragRef = useRef<{
@@ -182,8 +221,8 @@ export function LabelCanvas({
       const { x, y } = getDropPositionMm(e.clientX, e.clientY)
 
       const elementType = e.dataTransfer.getData(LABEL_ELEMENT_DRAG_MIME)
-      if (onElementDrop && isLabelElementType(elementType)) {
-        onElementDrop(elementType, x, y)
+      if (onElementDrop && isLabelPaletteDropType(elementType)) {
+        onElementDrop(elementType as LabelElementType | "vline", x, y)
         return
       }
 
@@ -197,50 +236,147 @@ export function LabelCanvas({
     [dragOver, getDropPositionMm, onElementDrop, onImageDrop],
   )
 
+  const resolveClickSelection = useCallback(
+    (el: LabelElement, additive: boolean): string[] => {
+      const elements = template.definition.elements
+      const clickedIds = expandSelectionWithGroups(elements, [el.id])
+
+      if (!additive) {
+        return clickedIds
+      }
+
+      const current = new Set(selectedSet.current)
+      const allSelected = clickedIds.every((id) => current.has(id))
+      if (allSelected) {
+        for (const id of clickedIds) {
+          current.delete(id)
+        }
+      } else {
+        for (const id of clickedIds) {
+          current.add(id)
+        }
+      }
+      return [...current]
+    },
+    [template.definition.elements],
+  )
+
   const handlePointerDown = useCallback(
-    (e: React.PointerEvent, el: LabelElement) => {
+    (e: ReactPointerEvent, el: LabelElement) => {
       e.stopPropagation()
-      onSelect(el.id)
+      const additive = e.ctrlKey || e.metaKey || e.shiftKey
+      let nextIds = resolveClickSelection(el, additive)
+
+      // Dragging an already-selected member keeps the whole selection.
+      if (!additive && selectedSet.current.has(el.id) && selectedSet.current.size > 1) {
+        nextIds = [...selectedSet.current]
+      } else if (!additive && el.groupId) {
+        nextIds = expandSelectionWithGroups(template.definition.elements, [el.id])
+      }
+
+      onSelectIds(nextIds)
+
+      const origins: Record<string, { x: number; y: number }> = {}
+      const dragIds = nextIds.length > 0 ? nextIds : [el.id]
+      for (const item of template.definition.elements) {
+        if (dragIds.includes(item.id)) {
+          origins[item.id] = { x: item.x, y: item.y }
+        }
+      }
+      // Ensure the clicked element is always in the drag set.
+      if (!origins[el.id]) {
+        origins[el.id] = { x: el.x, y: el.y }
+      }
+
       dragRef.current = {
-        id: el.id,
         startX: e.clientX,
         startY: e.clientY,
-        origX: el.x,
-        origY: el.y,
+        origins,
       }
       ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
     },
-    [onSelect],
+    [onSelectIds, resolveClickSelection, template.definition.elements],
   )
 
   const handlePointerMove = useCallback(
-    (e: React.PointerEvent, el: LabelElement) => {
-      if (!dragRef.current || dragRef.current.id !== el.id) {
+    (e: ReactPointerEvent) => {
+      if (resizeRef.current) {
+        const screenDx = pxToMm(e.clientX - resizeRef.current.startX, zoom)
+        const screenDy = pxToMm(e.clientY - resizeRef.current.startY, zoom)
+        const el = template.definition.elements.find((item) => item.id === resizeRef.current?.id)
+        if (!el) {
+          return
+        }
+        const rotationDeg = normalizeElementRotationDeg(el.rotationDeg)
+        const { dx, dy } =
+          rotationDeg === 0
+            ? { dx: screenDx, dy: screenDy }
+            : screenDeltaToLocalElementDelta(screenDx, screenDy, rotationDeg)
+        let nextBox = resizeLabelElementBox(
+          resizeRef.current.origin,
+          resizeRef.current.handle,
+          dx,
+          dy,
+          template.width_mm,
+          template.height_mm,
+          isLabelCornerResizeHandle(resizeRef.current.handle),
+        )
+        if (rotationDeg !== 0) {
+          nextBox = placeBoxKeepingCenter(
+            resizeRef.current.origin,
+            nextBox.width,
+            nextBox.height,
+            template.width_mm,
+            template.height_mm,
+          )
+        }
+        onUpdateElement({
+          ...el,
+          ...nextBox,
+        })
+        return
+      }
+      if (!dragRef.current) {
         return
       }
       const dx = pxToMm(e.clientX - dragRef.current.startX, zoom)
       const dy = pxToMm(e.clientY - dragRef.current.startY, zoom)
-      onUpdateElement({
-        ...el,
-        x: Math.max(0, Math.round((dragRef.current.origX + dx) * 10) / 10),
-        y: Math.max(0, Math.round((dragRef.current.origY + dy) * 10) / 10),
-      })
+      onApplyDragFromOrigins(dragRef.current.origins, dx, dy)
     },
-    [onUpdateElement, zoom],
+    [onApplyDragFromOrigins, onUpdateElement, template.definition.elements, template.height_mm, template.width_mm, zoom],
   )
 
   const handlePointerUp = useCallback(() => {
     dragRef.current = null
+    resizeRef.current = null
     groupDragRef.current = null
   }, [])
 
+  const handleResizePointerDown = useCallback(
+    (e: ReactPointerEvent, el: LabelElement, handle: LabelResizeHandle) => {
+      e.stopPropagation()
+      e.preventDefault()
+      onSelectIds([el.id])
+      dragRef.current = null
+      resizeRef.current = {
+        id: el.id,
+        handle,
+        startX: e.clientX,
+        startY: e.clientY,
+        origin: { x: el.x, y: el.y, width: el.width, height: el.height },
+      }
+      ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    },
+    [onSelectIds],
+  )
+
   const handleGroupPointerDown = useCallback(
-    (e: React.PointerEvent) => {
+    (e: ReactPointerEvent) => {
       if (!onOffsetAllElements || template.definition.elements.length === 0) {
-        onSelect(null)
+        onSelectIds([])
         return
       }
-      onSelect(null)
+      onSelectIds([])
       groupDragRef.current = {
         startX: e.clientX,
         startY: e.clientY,
@@ -249,11 +385,11 @@ export function LabelCanvas({
       }
       ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
     },
-    [onOffsetAllElements, onSelect, template.definition.elements.length],
+    [onOffsetAllElements, onSelectIds, template.definition.elements.length],
   )
 
   const handleGroupPointerMove = useCallback(
-    (e: React.PointerEvent) => {
+    (e: ReactPointerEvent) => {
       if (!groupDragRef.current || !onOffsetAllElements) {
         return
       }
@@ -279,6 +415,7 @@ export function LabelCanvas({
   )
 
   const sorted = sortElementsForRender(template.definition.elements)
+  const selectedLookup = new Set(selectedIds)
 
   return (
     <div className="flex flex-col">
@@ -318,24 +455,54 @@ export function LabelCanvas({
           </Button>
           </div>
         </div>
-        {onOffsetAllElements ? (
+        {onOffsetAllElements || onScaleAllElements ? (
           <div className="flex flex-wrap items-center gap-1">
             <span className="mr-1 flex items-center gap-1 text-xs text-muted-foreground">
               <Move className="size-3.5" />
               Barcha elementlar
             </span>
-            <Button type="button" variant="outline" size="icon" className="size-8" onClick={() => nudgeAll(-1, 0)} title="Chapga 1 mm">
-              <ArrowLeft className="size-4" />
-            </Button>
-            <Button type="button" variant="outline" size="icon" className="size-8" onClick={() => nudgeAll(1, 0)} title="O'ngga 1 mm">
-              <ArrowRight className="size-4" />
-            </Button>
-            <Button type="button" variant="outline" size="icon" className="size-8" onClick={() => nudgeAll(0, -1)} title="Yuqoriga 1 mm">
-              <ArrowUp className="size-4" />
-            </Button>
-            <Button type="button" variant="outline" size="icon" className="size-8" onClick={() => nudgeAll(0, 1)} title="Pastga 1 mm">
-              <ArrowDown className="size-4" />
-            </Button>
+            {onScaleAllElements ? (
+              <>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="size-8"
+                  disabled={template.definition.elements.length === 0}
+                  onClick={() => onScaleAllElements(1 / LABEL_ELEMENT_SCALE_STEP)}
+                  title="Elementlarni kichraytirish (10%)"
+                >
+                  <Minus className="size-4" />
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="size-8"
+                  disabled={template.definition.elements.length === 0}
+                  onClick={() => onScaleAllElements(LABEL_ELEMENT_SCALE_STEP)}
+                  title="Elementlarni kattalashtirish (10%)"
+                >
+                  <Plus className="size-4" />
+                </Button>
+              </>
+            ) : null}
+            {onOffsetAllElements ? (
+              <>
+                <Button type="button" variant="outline" size="icon" className="size-8" onClick={() => nudgeAll(-1, 0)} title="Chapga 1 mm">
+                  <ArrowLeft className="size-4" />
+                </Button>
+                <Button type="button" variant="outline" size="icon" className="size-8" onClick={() => nudgeAll(1, 0)} title="O'ngga 1 mm">
+                  <ArrowRight className="size-4" />
+                </Button>
+                <Button type="button" variant="outline" size="icon" className="size-8" onClick={() => nudgeAll(0, -1)} title="Yuqoriga 1 mm">
+                  <ArrowUp className="size-4" />
+                </Button>
+                <Button type="button" variant="outline" size="icon" className="size-8" onClick={() => nudgeAll(0, 1)} title="Pastga 1 mm">
+                  <ArrowDown className="size-4" />
+                </Button>
+              </>
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -355,7 +522,7 @@ export function LabelCanvas({
             dragOver && "ring-2 ring-primary ring-offset-2",
           )}
           style={{ width: widthPx, height: heightPx }}
-          onClick={() => onSelect(null)}
+          onClick={() => onSelectIds([])}
         >
           <div
             className={cn(
@@ -388,12 +555,16 @@ export function LabelCanvas({
             </div>
           )}
 
-          {sorted.map((el) => (
+          {sorted.map((el) => {
+            const isSelected = selectedLookup.has(el.id)
+            const showResizeHandles = isSelected && selectedIds.length === 1
+            return (
             <div
               key={el.id}
               className={cn(
-                "absolute cursor-move select-none overflow-hidden border border-transparent",
-                selectedId === el.id && "border-primary ring-1 ring-primary",
+                "absolute cursor-move select-none border border-transparent",
+                showResizeHandles ? "overflow-visible" : "overflow-hidden",
+                isSelected && "border-primary ring-1 ring-primary",
               )}
               style={{
                 left: mmToPx(el.x, zoom),
@@ -401,15 +572,55 @@ export function LabelCanvas({
                 width: mmToPx(el.width, zoom),
                 height: Math.max(mmToPx(el.height, zoom), 2),
                 zIndex: el.zIndex ?? 1,
+                transform: el.rotationDeg ? `rotate(${el.rotationDeg}deg)` : undefined,
+                transformOrigin: "center center",
               }}
               onPointerDown={(e) => handlePointerDown(e, el)}
-              onPointerMove={(e) => handlePointerMove(e, el)}
+              onPointerMove={handlePointerMove}
               onPointerUp={handlePointerUp}
               onClick={(e) => e.stopPropagation()}
             >
-              <ElementPreview element={el} preview={preview} zoom={zoom} sampleData={previewData} />
+              <div className="h-full w-full overflow-hidden">
+                <ElementPreview element={el} preview={preview} zoom={zoom} sampleData={previewData} />
+              </div>
+              {showResizeHandles
+                ? RESIZE_HANDLES.map((handle) => (
+                    <button
+                      key={handle.id}
+                      type="button"
+                      aria-label={`Resize ${handle.id}`}
+                      title={
+                        isLabelCornerResizeHandle(handle.id)
+                          ? "Burchak: proporsiya saqlanadi"
+                          : "Yon: erkin o'lcham"
+                      }
+                      className={cn(
+                        "absolute z-20 flex size-3 items-center justify-center rounded-sm border border-primary bg-background shadow-sm",
+                        "hover:bg-primary hover:text-primary-foreground",
+                        isLabelCornerResizeHandle(handle.id) && "size-3.5 rounded-[2px]",
+                      )}
+                      style={{ ...handle.style, cursor: handle.cursor }}
+                      onPointerDown={(e) => handleResizePointerDown(e, el, handle.id)}
+                      onPointerMove={handlePointerMove}
+                      onPointerUp={handlePointerUp}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <span
+                        className={cn(
+                          "block bg-primary",
+                          handle.id === "n" || handle.id === "s"
+                            ? "h-0.5 w-2"
+                            : handle.id === "e" || handle.id === "w"
+                              ? "h-2 w-0.5"
+                              : "size-1.5 rotate-45",
+                        )}
+                      />
+                    </button>
+                  ))
+                : null}
             </div>
-          ))}
+            )
+          })}
 
           <div className="pointer-events-none absolute bottom-1 right-2 text-[10px] text-muted-foreground">
             {template.width_mm}×{template.height_mm} mm
@@ -418,10 +629,112 @@ export function LabelCanvas({
 
         {(onImageDrop || onElementDrop) && !dragOver && (
           <p className="mt-3 text-center text-xs text-muted-foreground">
-            Element yoki rasmni maket ustiga sudrab tashlang · bo&apos;sh joydan sudrab barcha elementlarni siljiting · Ctrl + g&apos;ildirak = zoom
+            Element yoki rasmni maket ustiga sudrab tashlang · tanlanganda burchak/yon tutqichlar =
+            o&apos;lcham (burchak = proporsiya) · Ctrl+click = ko&apos;p tanlov · Ctrl+G = guruhlash ·
+            bo&apos;sh joydan sudrab barcha elementlarni siljiting · Ctrl + g&apos;ildirak = zoom
           </p>
         )}
       </div>
+    </div>
+  )
+}
+
+function SqueezeText({
+  text,
+  fontPx,
+  fontFamily,
+  fontWeight,
+  align,
+  className,
+}: {
+  text: string
+  fontPx: number
+  fontFamily: string
+  fontWeight: string | number
+  align: "left" | "center" | "right"
+  className?: string
+}) {
+  const boxRef = useRef<HTMLDivElement>(null)
+  const measureRef = useRef<HTMLSpanElement>(null)
+  const [scaleX, setScaleX] = useState(1)
+
+  const recompute = useCallback(() => {
+    const measure = measureRef.current
+    const box = boxRef.current
+    if (!measure || !box) {
+      return
+    }
+    // Subtract horizontal padding (px-0.5 ≈ 2px each side) so scale matches the
+    // printable content width inside the clipped box.
+    const padX = 2
+    const available = Math.max(0, box.clientWidth - padX * 2)
+    const needed = measure.scrollWidth
+    if (available <= 0 || needed <= 0) {
+      setScaleX(1)
+      return
+    }
+    setScaleX(needed > available ? Math.max(0.15, available / needed) : 1)
+  }, [])
+
+  useEffect(() => {
+    recompute()
+  }, [text, fontPx, fontFamily, fontWeight, align, recompute])
+
+  useEffect(() => {
+    const box = boxRef.current
+    if (!box || typeof ResizeObserver === "undefined") {
+      return
+    }
+    const ro = new ResizeObserver(() => {
+      recompute()
+    })
+    ro.observe(box)
+    return () => ro.disconnect()
+  }, [recompute])
+
+  const origin = align === "center" ? "center" : align === "right" ? "right" : "left"
+
+  return (
+    <div
+      ref={boxRef}
+      className={cn(
+        "relative flex h-full w-full items-center overflow-hidden px-0.5 leading-tight text-foreground",
+        className,
+      )}
+      style={{
+        justifyContent: align === "center" ? "center" : align === "right" ? "flex-end" : "flex-start",
+      }}
+    >
+      {/* Unconstrained measure: must not inherit maxWidth or the live scaleX. */}
+      <span
+        ref={measureRef}
+        aria-hidden
+        className="pointer-events-none absolute left-0 top-0 whitespace-pre opacity-0"
+        style={{
+          fontSize: `${fontPx}px`,
+          fontFamily,
+          fontWeight,
+          visibility: "hidden",
+          maxWidth: "none",
+          width: "max-content",
+        }}
+      >
+        {text}
+      </span>
+      <span
+        style={{
+          fontSize: `${fontPx}px`,
+          fontFamily,
+          fontWeight,
+          textAlign: align,
+          whiteSpace: "pre",
+          display: "inline-block",
+          transform: scaleX < 1 ? `scaleX(${scaleX})` : undefined,
+          transformOrigin: origin,
+        }}
+      >
+        {text}
+      </span>
     </div>
   )
 }
@@ -455,6 +768,7 @@ function ElementPreview({
           : "Backend"
 
     const fontPx = ptToCanvasPx(element.fontSize ?? 10, zoom)
+    const align = element.align ?? "left"
 
     return (
       <div className="relative h-full w-full">
@@ -469,20 +783,13 @@ function ElementPreview({
         >
           {dataSource === "static" ? "S" : "B"}
         </span>
-        <div
-          className="flex h-full w-full items-center overflow-hidden px-0.5 leading-tight text-foreground"
-          style={{
-            fontSize: `${fontPx}px`,
-            fontFamily: labelFontFamilyCss(element.fontFamily),
-            fontWeight: element.fontWeight ?? "normal",
-            textAlign: element.align ?? "left",
-            justifyContent:
-              element.align === "center" ? "center" : element.align === "right" ? "flex-end" : "flex-start",
-            whiteSpace: "pre-wrap",
-          }}
-        >
-          {text}
-        </div>
+        <SqueezeText
+          text={text}
+          fontPx={fontPx}
+          fontFamily={labelFontFamilyCss(element.fontFamily)}
+          fontWeight={element.fontWeight ?? "normal"}
+          align={align}
+        />
       </div>
     )
   }
@@ -587,14 +894,25 @@ function ElementPreview({
   }
 
   if (element.type === "line") {
+    const vertical = element.orientation === "vertical"
     return (
       <div
-        className="w-full bg-foreground"
-        style={{
-          height: Math.max(mmToPx(element.strokeWidth ?? 0.3, zoom), 1),
-          marginTop: "auto",
-          marginBottom: "auto",
-        }}
+        className="bg-foreground"
+        style={
+          vertical
+            ? {
+                width: Math.max(mmToPx(element.strokeWidth ?? 0.3, zoom), 1),
+                height: "100%",
+                marginLeft: "auto",
+                marginRight: "auto",
+              }
+            : {
+                width: "100%",
+                height: Math.max(mmToPx(element.strokeWidth ?? 0.3, zoom), 1),
+                marginTop: "auto",
+                marginBottom: "auto",
+              }
+        }
       />
     )
   }
@@ -636,24 +954,19 @@ function ElementPreview({
           const fontPt = cell.fontSize ?? defaultFontPt
           const fontPx = ptToCanvasPx(fontPt, zoom)
           const dataSource = inferTableCellDataSource(cell)
+          const align = cell.align ?? "center"
 
           return (
             <div
               key={index}
               className={cn(
-                "relative flex min-h-0 min-w-0 items-center overflow-hidden border-foreground px-0.5 leading-tight text-foreground",
+                "relative min-h-0 min-w-0 overflow-hidden border-foreground leading-tight text-foreground",
                 row < rows - 1 && "border-b",
                 col < cols - 1 && "border-r",
               )}
               style={{
                 backgroundColor: cell.fillColor ?? "transparent",
                 borderWidth: strokePx,
-                fontSize: `${fontPx}px`,
-                fontFamily: labelFontFamilyCss(cell.fontFamily ?? element.fontFamily),
-                fontWeight: cell.fontWeight ?? "normal",
-                textAlign: cell.align ?? "center",
-                justifyContent:
-                  cell.align === "left" ? "flex-start" : cell.align === "right" ? "flex-end" : "center",
               }}
             >
               {!preview && dataSource === "backend" && cell.binding ? (
@@ -664,7 +977,13 @@ function ElementPreview({
                   B
                 </span>
               ) : null}
-              <span className="truncate">{text}</span>
+              <SqueezeText
+                text={text}
+                fontPx={fontPx}
+                fontFamily={labelFontFamilyCss(cell.fontFamily ?? element.fontFamily)}
+                fontWeight={cell.fontWeight ?? "normal"}
+                align={align}
+              />
             </div>
           )
         })}

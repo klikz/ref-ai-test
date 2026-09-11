@@ -29,7 +29,7 @@ type AuxiliaryReportDetailRow struct {
 	Comment        string  `json:"comment"`
 }
 
-var auxiliaryReportLineIDs = []int{FinPressLineID, RadiatorLineID, KlapanLineID, EshikLineID}
+var auxiliaryReportLineIDs = []int{EshikLineID}
 
 func effectiveAuxiliaryLineIDs(lineIDs []int) []int {
 	if len(lineIDs) == 0 {
@@ -123,16 +123,51 @@ func (r *Repo) AuxiliaryReportCount(dateFrom, dateTo string, lineIDs []int) (int
 	if err != nil {
 		return 0, err
 	}
-	var count int
-	err = r.store.db.QueryRow(`
-		SELECT COUNT(*)::int
-		FROM lines.balance_transactions bt
-		WHERE bt.created_at >= $1::timestamp
-		  AND bt.created_at < $2::timestamp
-		  AND bt.line_id = ANY($3)`,
-		from, to, intSliceParam(effectiveAuxiliaryLineIDs(lineIDs)),
-	).Scan(&count)
-	return count, err
+	ids := effectiveAuxiliaryLineIDs(lineIDs)
+	// Eshik: one produced unit = freeze+ref pair. Count freeze print sessions.
+	hasEshik := false
+	otherIDs := make([]int, 0, len(ids))
+	for _, id := range ids {
+		if id == EshikLineID {
+			hasEshik = true
+			continue
+		}
+		otherIDs = append(otherIDs, id)
+	}
+
+	total := 0
+	if hasEshik {
+		var pairCount int
+		err = r.store.db.QueryRow(`
+			SELECT COUNT(*)::int
+			FROM production.eshik_print_sessions s
+			INNER JOIN production.eshik_model_parts p ON p.id = s.eshik_model_part_id
+			WHERE s.c_time >= $1::timestamp
+			  AND s.c_time < $2::timestamp
+			  AND p.door_code = $3`,
+			from, to, EshikDoorFreeze,
+		).Scan(&pairCount)
+		if err != nil {
+			return 0, err
+		}
+		total += pairCount
+	}
+	if len(otherIDs) > 0 {
+		var count int
+		err = r.store.db.QueryRow(`
+			SELECT COUNT(*)::int
+			FROM lines.balance_transactions bt
+			WHERE bt.created_at >= $1::timestamp
+			  AND bt.created_at < $2::timestamp
+			  AND bt.line_id = ANY($3)`,
+			from, to, intSliceParam(otherIDs),
+		).Scan(&count)
+		if err != nil {
+			return 0, err
+		}
+		total += count
+	}
+	return total, nil
 }
 
 const auxiliaryReportDetailQuery = `

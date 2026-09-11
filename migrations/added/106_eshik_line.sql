@@ -6,13 +6,13 @@ BEGIN;
 
 INSERT INTO lines.lines_list (id, line_id, name, status, folder_name)
 OVERRIDING SYSTEM VALUE
-SELECT 11, 11, 'Eshik liniyasi', true, 'eshik'
+SELECT 11, 11, 'Eshiklarni kesish va formalash uchastkasi', true, 'eshik'
 WHERE NOT EXISTS (
     SELECT 1 FROM lines.lines_list WHERE line_id = 11
 );
 
 UPDATE lines.lines_list
-SET name = 'Eshik liniyasi',
+SET name = 'Eshiklarni kesish va formalash uchastkasi',
     folder_name = 'eshik',
     status = true,
     line_id = 11

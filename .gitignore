@@ -3,6 +3,9 @@
 .env.*
 !.env.example
 
+# local AI test/prod scaffold (managed separately; not part of main repo)
+ref-ai/
+
 # deps / build
 node_modules/
 ui/node_modules/

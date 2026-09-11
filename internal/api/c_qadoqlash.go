@@ -33,12 +33,20 @@ func (s *ServerModel) LinesQadoqlashComplete(c *gin.Context) {
 
 	accSerial, _ := jsonMap["acc_serial"].(string)
 	accSerial = strings.TrimSpace(accSerial)
+	freezeDoorSerial, _ := jsonMap["freeze_door_serial"].(string)
+	freezeDoorSerial = strings.TrimSpace(freezeDoorSerial)
+	refDoorSerial, _ := jsonMap["ref_door_serial"].(string)
+	refDoorSerial = strings.TrimSpace(refDoorSerial)
+	// Legacy single door_serial → treat as freeze when freeze empty
 	doorSerial, _ := jsonMap["door_serial"].(string)
 	doorSerial = strings.TrimSpace(doorSerial)
 	if doorSerial == "" {
 		if v, ok := jsonMap["eshik_serial"].(string); ok {
 			doorSerial = strings.TrimSpace(v)
 		}
+	}
+	if freezeDoorSerial == "" {
+		freezeDoorSerial = doorSerial
 	}
 	serial, _ := jsonMap["serial"].(string)
 	serial = strings.TrimSpace(serial)
@@ -70,21 +78,23 @@ func (s *ServerModel) LinesQadoqlashComplete(c *gin.Context) {
 			return
 		}
 		gsCode, _ := s.Store.Repo().GsCodeBySerial(serial)
-		if err := s.qadoqlashPrintAll(serial, ctx.AccSerial, ctx.DoorSerial, gsCode, ctx.Model, ctx.Lab); err != nil {
+		if err := s.qadoqlashPrintAll(serial, ctx.AccSerial, ctx.FreezeDoorSerial, ctx.RefDoorSerial, gsCode, ctx.Model, ctx.Lab); err != nil {
 			s.Utils.SendError(c, err, "LinesQadoqlashComplete: reprint print", "")
 			return
 		}
 		s.Utils.SendOK(c, map[string]any{
-			"serial":      serial,
-			"acc_serial":  ctx.AccSerial,
-			"door_serial": ctx.DoorSerial,
-			"bx_result":   ctx.Lab.BxResult,
-			"compressor":  strings.TrimSpace(ctx.Lab.Compressor),
-			"bx_model":    strings.TrimSpace(ctx.Lab.BxModel),
-			"model_id":    ctx.Model.ID,
-			"modeli":      ctx.Model.Modeli,
-			"product_id":  ctx.ProductID,
-			"reprint":     true,
+			"serial":             serial,
+			"acc_serial":         ctx.AccSerial,
+			"door_serial":        ctx.FreezeDoorSerial,
+			"freeze_door_serial": ctx.FreezeDoorSerial,
+			"ref_door_serial":    ctx.RefDoorSerial,
+			"bx_result":          ctx.Lab.BxResult,
+			"compressor":         strings.TrimSpace(ctx.Lab.Compressor),
+			"bx_model":           strings.TrimSpace(ctx.Lab.BxModel),
+			"model_id":           ctx.Model.ID,
+			"modeli":             ctx.Model.Modeli,
+			"product_id":         ctx.ProductID,
+			"reprint":            true,
 		})
 		return
 	}
@@ -93,12 +103,20 @@ func (s *ServerModel) LinesQadoqlashComplete(c *gin.Context) {
 		s.Utils.SendError(c, errors.New("Acc serial bo'sh"), "LinesQadoqlashComplete: acc_serial", "")
 		return
 	}
-	if doorSerial == "" {
-		s.Utils.SendError(c, errors.New("Eshik serial bo'sh"), "LinesQadoqlashComplete: door_serial", "")
+	if freezeDoorSerial == "" {
+		s.Utils.SendError(c, errors.New("Freeze door serial bo'sh"), "LinesQadoqlashComplete: freeze_door_serial", "")
+		return
+	}
+	if refDoorSerial == "" {
+		s.Utils.SendError(c, errors.New("Ref door serial bo'sh"), "LinesQadoqlashComplete: ref_door_serial", "")
+		return
+	}
+	if strings.EqualFold(freezeDoorSerial, refDoorSerial) {
+		s.Utils.SendError(c, errors.New("Freeze va Ref serial bir xil bo'lishi mumkin emas"), "LinesQadoqlashComplete: door same", "")
 		return
 	}
 
-	if err := s.qadoqlashCheckAccDoorUnique(serial, accSerial, doorSerial); err != nil {
+	if err := s.qadoqlashCheckAccDoorUnique(serial, accSerial, freezeDoorSerial, refDoorSerial); err != nil {
 		s.Utils.SendError(c, err, "LinesQadoqlashComplete: unique", "")
 		return
 	}
@@ -138,8 +156,12 @@ func (s *ServerModel) LinesQadoqlashComplete(c *gin.Context) {
 		s.Utils.SendError(c, errors.New("Model topilmadi"), "LinesQadoqlashComplete: model", "")
 		return
 	}
-	if !store.ModelAccSerialMatches(doorSerial, modelShort.DoorCode) {
-		s.Utils.SendError(c, qadoqlashSerialMismatchError("Eshik serial", doorSerial, modelShort.DoorCode), "LinesQadoqlashComplete: door", "")
+	if !store.ModelAccSerialMatches(freezeDoorSerial, modelShort.FreezeDoorCode) {
+		s.Utils.SendError(c, qadoqlashSerialMismatchError("Freeze door serial", freezeDoorSerial, modelShort.FreezeDoorCode), "LinesQadoqlashComplete: freeze_door", "")
+		return
+	}
+	if !store.ModelAccSerialMatches(refDoorSerial, modelShort.RefDoorCode) {
+		s.Utils.SendError(c, qadoqlashSerialMismatchError("Ref door serial", refDoorSerial, modelShort.RefDoorCode), "LinesQadoqlashComplete: ref_door", "")
 		return
 	}
 	if !store.ModelAccSerialMatches(accSerial, modelShort.AccSerial) {
@@ -189,7 +211,7 @@ func (s *ServerModel) LinesQadoqlashComplete(c *gin.Context) {
 	}
 
 	if err := s.Store.Repo().ProductParamsUpsertQadoqlash(
-		serial, labRow.Compressor, accSerial, doorSerial, selectedModel.ID, userID,
+		serial, labRow.Compressor, accSerial, freezeDoorSerial, refDoorSerial, selectedModel.ID, userID,
 	); err != nil {
 		if transfer.ToProductID > 0 {
 			_ = s.Store.Repo().ProductLineTransferRollback(transfer)
@@ -198,22 +220,32 @@ func (s *ServerModel) LinesQadoqlashComplete(c *gin.Context) {
 		return
 	}
 
+	if err := s.Store.Repo().ProductUpdateQadoqlashDoors(productID, freezeDoorSerial, refDoorSerial); err != nil {
+		if transfer.ToProductID > 0 {
+			_ = s.Store.Repo().ProductLineTransferRollback(transfer)
+		}
+		s.Utils.SendError(c, err, "LinesQadoqlashComplete: ProductUpdateQadoqlashDoors", "")
+		return
+	}
+
 	gsCode, _ := s.Store.Repo().GsCodeBySerial(serial)
-	if err := s.qadoqlashPrintAll(serial, accSerial, doorSerial, gsCode, selectedModel, labRow); err != nil {
+	if err := s.qadoqlashPrintAll(serial, accSerial, freezeDoorSerial, refDoorSerial, gsCode, selectedModel, labRow); err != nil {
 		s.Utils.SendError(c, err, "LinesQadoqlashComplete: print", "")
 		return
 	}
 
 	resp := map[string]any{
-		"serial":      serial,
-		"acc_serial":  accSerial,
-		"door_serial": doorSerial,
-		"bx_result":   labRow.BxResult,
-		"compressor":  strings.TrimSpace(labRow.Compressor),
-		"bx_model":    strings.TrimSpace(labRow.BxModel),
-		"model_id":    selectedModel.ID,
-		"modeli":      selectedModel.Modeli,
-		"product_id":  productID,
+		"serial":             serial,
+		"acc_serial":         accSerial,
+		"door_serial":        freezeDoorSerial,
+		"freeze_door_serial": freezeDoorSerial,
+		"ref_door_serial":    refDoorSerial,
+		"bx_result":          labRow.BxResult,
+		"compressor":         strings.TrimSpace(labRow.Compressor),
+		"bx_model":           strings.TrimSpace(labRow.BxModel),
+		"model_id":           selectedModel.ID,
+		"modeli":             selectedModel.Modeli,
+		"product_id":         productID,
 	}
 	if scanPhoto != nil {
 		resp["scan_photo"] = scanPhoto
@@ -259,7 +291,7 @@ func (s *ServerModel) LinesQadoqlashReprint(c *gin.Context) {
 	}
 
 	gsCode, _ := s.Store.Repo().GsCodeBySerial(serial)
-	printData, err := s.qadoqlashBuildPrintData(serial, ctx.AccSerial, ctx.DoorSerial, gsCode, ctx.Model, ctx.Lab)
+	printData, err := s.qadoqlashBuildPrintData(serial, ctx.AccSerial, ctx.FreezeDoorSerial, ctx.RefDoorSerial, gsCode, ctx.Model, ctx.Lab)
 	if err != nil {
 		s.Utils.SendError(c, err, "LinesQadoqlashReprint: printData", "")
 		return
@@ -270,11 +302,13 @@ func (s *ServerModel) LinesQadoqlashReprint(c *gin.Context) {
 	}
 
 	s.Utils.SendOK(c, map[string]any{
-		"serial":      serial,
-		"acc_serial":  ctx.AccSerial,
-		"door_serial": ctx.DoorSerial,
-		"printer_id":  printer.ID,
-		"printer":     printer.PrinterName,
+		"serial":             serial,
+		"acc_serial":         ctx.AccSerial,
+		"door_serial":        ctx.FreezeDoorSerial,
+		"freeze_door_serial": ctx.FreezeDoorSerial,
+		"ref_door_serial":    ctx.RefDoorSerial,
+		"printer_id":         printer.ID,
+		"printer":            printer.PrinterName,
 	})
 }
 
@@ -297,11 +331,13 @@ func (s *ServerModel) LinesQadoqlashSessionsLast(c *gin.Context) {
 }
 
 type qadoqlashPrintContext struct {
-	ProductID int
-	AccSerial string
-	DoorSerial string
-	Model     models.ModelInfo
-	Lab       store.LabBxRow
+	ProductID        int
+	AccSerial        string
+	DoorSerial       string
+	FreezeDoorSerial string
+	RefDoorSerial    string
+	Model            models.ModelInfo
+	Lab              store.LabBxRow
 }
 
 func (s *ServerModel) qadoqlashLoadPrintContext(serial string) (qadoqlashPrintContext, error) {
@@ -327,12 +363,19 @@ func (s *ServerModel) qadoqlashLoadPrintContext(serial string) (qadoqlashPrintCo
 	if accSerial == "" {
 		accSerial = strings.TrimSpace(active.AccSerial)
 	}
-	doorSerial := strings.TrimSpace(params.DoorSerial)
+	freezeDoorSerial := strings.TrimSpace(params.FreezeDoorSerial)
+	if freezeDoorSerial == "" {
+		freezeDoorSerial = strings.TrimSpace(params.DoorSerial)
+	}
+	refDoorSerial := strings.TrimSpace(params.RefDoorSerial)
 	if accSerial == "" {
 		return out, errors.New("DB da acc_serial topilmadi")
 	}
-	if doorSerial == "" {
-		return out, errors.New("DB da eshik serial topilmadi")
+	if freezeDoorSerial == "" {
+		return out, errors.New("DB da freeze door serial topilmadi")
+	}
+	if refDoorSerial == "" {
+		return out, errors.New("DB da ref door serial topilmadi")
 	}
 
 	modelID := params.ModelID
@@ -351,23 +394,27 @@ func (s *ServerModel) qadoqlashLoadPrintContext(serial string) (qadoqlashPrintCo
 
 	out.ProductID = active.ID
 	out.AccSerial = accSerial
-	out.DoorSerial = doorSerial
+	out.DoorSerial = freezeDoorSerial
+	out.FreezeDoorSerial = freezeDoorSerial
+	out.RefDoorSerial = refDoorSerial
 	out.Model = selectedModel
 	out.Lab = labRow
 	return out, nil
 }
 
-func (s *ServerModel) qadoqlashCheckAccDoorUnique(serial, accSerial, doorSerial string) error {
+func (s *ServerModel) qadoqlashCheckAccDoorUnique(serial, accSerial, freezeDoorSerial, refDoorSerial string) error {
 	if byAcc, err := s.Store.Repo().ProductParamsGetByAccSerial(accSerial); err != nil {
 		return err
 	} else if byAcc.ID > 0 && !strings.EqualFold(byAcc.SerialNumber, serial) {
 		return fmt.Errorf("bu aksessuar nomer allaqachon kiritilgan (%s)", byAcc.SerialNumber)
 	}
 
-	if byDoor, err := s.Store.Repo().ProductParamsGetByDoorSerial(doorSerial); err != nil {
-		return err
-	} else if byDoor.ID > 0 && !strings.EqualFold(byDoor.SerialNumber, serial) {
-		return fmt.Errorf("bu eshik nomer allaqachon kiritilgan (%s)", byDoor.SerialNumber)
+	for _, doorSerial := range []string{freezeDoorSerial, refDoorSerial} {
+		if byDoor, err := s.Store.Repo().ProductParamsGetByDoorSerial(doorSerial); err != nil {
+			return err
+		} else if byDoor.ID > 0 && !strings.EqualFold(byDoor.SerialNumber, serial) {
+			return fmt.Errorf("bu eshik nomer allaqachon kiritilgan (%s)", byDoor.SerialNumber)
+		}
 	}
 	return nil
 }
@@ -395,13 +442,19 @@ func (s *ServerModel) qadoqlashEnsureProduct(
 }
 
 func (s *ServerModel) qadoqlashBuildPrintData(
-	serial, accSerial, doorSerial, gsCode string,
+	serial, accSerial, freezeDoorSerial, refDoorSerial, gsCode string,
 	selectedModel models.ModelInfo,
 	labRow store.LabBxRow,
 ) (map[string]any, error) {
 	printData := utils.BuildLabelPrintData(serial, accSerial, selectedModel, gsCode)
-	printData["door_serial"] = doorSerial
-	printData["eshik"] = map[string]any{"serial": doorSerial}
+	printData["door_serial"] = freezeDoorSerial
+	printData["freeze_door_serial"] = freezeDoorSerial
+	printData["ref_door_serial"] = refDoorSerial
+	printData["eshik"] = map[string]any{
+		"serial":        freezeDoorSerial,
+		"freeze_serial": freezeDoorSerial,
+		"ref_serial":    refDoorSerial,
+	}
 	printData["compressor"] = strings.TrimSpace(labRow.Compressor)
 	printData["bx_model"] = strings.TrimSpace(labRow.BxModel)
 	printData["bx_result"] = strings.TrimSpace(labRow.BxResult)
@@ -422,7 +475,7 @@ func (s *ServerModel) qadoqlashBuildPrintData(
 }
 
 func (s *ServerModel) qadoqlashPrintAll(
-	serial, accSerial, doorSerial, gsCode string,
+	serial, accSerial, freezeDoorSerial, refDoorSerial, gsCode string,
 	selectedModel models.ModelInfo,
 	labRow store.LabBxRow,
 ) error {
@@ -434,7 +487,7 @@ func (s *ServerModel) qadoqlashPrintAll(
 		return errors.New("Qadoqlash liniyasida printer topilmadi")
 	}
 
-	printData, err := s.qadoqlashBuildPrintData(serial, accSerial, doorSerial, gsCode, selectedModel, labRow)
+	printData, err := s.qadoqlashBuildPrintData(serial, accSerial, freezeDoorSerial, refDoorSerial, gsCode, selectedModel, labRow)
 	if err != nil {
 		return err
 	}

@@ -19,8 +19,8 @@ const (
 	IchkiLineID = 7
 )
 
-var ProductionPlanProductLineIDs = []int{1}
-var ProductionPlanAuxiliaryLineIDs = []int{11}
+var ProductionPlanProductLineIDs = []int{YigishLineID, QadoqlashLineID} // Yi'g'ish, Qadoqlash
+var ProductionPlanAuxiliaryLineIDs = []int{EshikLineID}                 // Eshik
 
 func IsProductionPlanProductLine(lineID int) bool {
 	for _, id := range ProductionPlanProductLineIDs {
@@ -257,6 +257,23 @@ func (r *Repo) ProductionPlanActualQty(planDate string, lineID, shiftNo, modelID
 		return count, err
 	}
 	return 0, nil
+}
+
+// ProductionPlanEshikPairActualQty returns complete freeze+ref pair count for an eshik model.
+func (r *Repo) ProductionPlanEshikPairActualQty(planDate string, shiftNo, eshikModelID int) (int, error) {
+	freezeID, refID, err := r.EshikComponentIDsByModelID(eshikModelID)
+	if err != nil {
+		return 0, err
+	}
+	freezeActual, err := r.ProductionPlanActualQty(planDate, EshikLineID, shiftNo, 0, freezeID)
+	if err != nil {
+		return 0, err
+	}
+	refActual, err := r.ProductionPlanActualQty(planDate, EshikLineID, shiftNo, 0, refID)
+	if err != nil {
+		return 0, err
+	}
+	return eshikPairMin(freezeActual, refActual), nil
 }
 
 func (r *Repo) ProductionPlanAssertCanProduce(lineID, modelID, componentID, qty int) error {
@@ -500,11 +517,52 @@ type PlanUpsertCell struct {
 }
 
 func (r *Repo) ProductionPlanUpsertCells(cells []PlanUpsertCell) error {
-	return r.productionPlanSaveCells(cells, false)
+	expanded, err := r.expandEshikPlanCells(cells)
+	if err != nil {
+		return err
+	}
+	return r.productionPlanSaveCells(expanded, false)
 }
 
 func (r *Repo) ProductionPlanSaveCells(cells []PlanUpsertCell) error {
-	return r.productionPlanSaveCells(cells, true)
+	expanded, err := r.expandEshikPlanCells(cells)
+	if err != nil {
+		return err
+	}
+	return r.productionPlanSaveCells(expanded, true)
+}
+
+// expandEshikPlanCells turns eshik_model_id (sent as component_id from UI) into freeze+ref component plan rows.
+func (r *Repo) expandEshikPlanCells(cells []PlanUpsertCell) ([]PlanUpsertCell, error) {
+	if len(cells) == 0 {
+		return cells, nil
+	}
+	out := make([]PlanUpsertCell, 0, len(cells)*2)
+	for _, cell := range cells {
+		if cell.LineID != EshikLineID {
+			out = append(out, cell)
+			continue
+		}
+		modelID := cell.ComponentID
+		if modelID <= 0 {
+			modelID = cell.ModelID
+		}
+		if modelID <= 0 {
+			return nil, errors.New("eshik modeli tanlanmagan")
+		}
+		freezeID, refID, err := r.EshikComponentIDsByModelID(modelID)
+		if err != nil {
+			return nil, err
+		}
+		freezeCell := cell
+		freezeCell.ModelID = 0
+		freezeCell.ComponentID = freezeID
+		refCell := cell
+		refCell.ModelID = 0
+		refCell.ComponentID = refID
+		out = append(out, freezeCell, refCell)
+	}
+	return out, nil
 }
 
 func (r *Repo) productionPlanSaveCells(cells []PlanUpsertCell, rejectLocked bool) error {
@@ -748,7 +806,16 @@ func (r *Repo) ProductionPlanGetDay(planDate string, lineID int, shiftNo int) ([
 		applyProductionPlanActuals(&row, actuals)
 		items = append(items, row)
 	}
-	return items, status, rows.Err()
+	if err := rows.Err(); err != nil {
+		return items, status, err
+	}
+	if lineID == EshikLineID {
+		items, err = r.groupEshikDailyPlanItems(items)
+		if err != nil {
+			return nil, status, err
+		}
+	}
+	return items, status, nil
 }
 
 func (r *Repo) ProductionPlanReport(dateFrom, dateTo string, lineIDs []int) ([]DailyPlanItemRow, error) {
@@ -758,13 +825,25 @@ func (r *Repo) ProductionPlanReport(dateFrom, dateTo string, lineIDs []int) ([]D
 	if strings.TrimSpace(dateTo) == "" {
 		dateTo = dateFrom
 	}
+	if len(lineIDs) == 0 {
+		lineIDs = append(append([]int{}, ProductionPlanProductLineIDs...), ProductionPlanAuxiliaryLineIDs...)
+	}
 
 	query := `
 		SELECT i.id, i.plan_date::text, i.line_id, ll.name,
 			COALESCE(i.model_id, 0), COALESCE(i.component_id, 0),
 			COALESCE(NULLIF(m.modeli, ''), NULLIF(c.factory_code, ''), NULLIF(c.manufacturer_code, ''), ''),
-			COALESCE(NULLIF(m.qisqa_nomi, ''), NULLIF(c.factory_code, ''), NULLIF(c.manufacturer_code, ''), ''),
+			COALESCE(m.qisqa_nomi, ''),
 			COALESCE(NULLIF(m.odoo_code, ''), NULLIF(c.odoo_code, ''), ''),
+			COALESCE(m.brend, ''),
+			COALESCE(m.seriya_raqami, ''),
+			COALESCE(m.modeli, ''),
+			COALESCE(m.rangi, ''),
+			COALESCE((
+				SELECT COUNT(*)::int
+				FROM production.gscodes gs
+				WHERE gs.model_id = m.id AND gs.status = true
+			), 0),
 			i.shift_no, i.planned_qty, i.allow_overplan, COALESCE(d.status, 'draft')
 		FROM production.daily_plan_items i
 		INNER JOIN lines.lines_list ll ON ll.line_id = i.line_id
@@ -774,7 +853,7 @@ func (r *Repo) ProductionPlanReport(dateFrom, dateTo string, lineIDs []int) ([]D
 		LEFT JOIN production.components c ON c.id = i.component_id
 		WHERE i.plan_date >= $1::date
 		  AND i.plan_date <= $2::date
-		  AND (cardinality($3::int[]) = 0 OR i.line_id = ANY($3))
+		  AND i.line_id = ANY($3)
 		ORDER BY i.plan_date, ll.name, i.shift_no, COALESCE(m.modeli, c.factory_code, '')`
 
 	rows, err := r.store.db.Query(query, dateFrom, dateTo, intSliceParam(lineIDs))
@@ -796,6 +875,7 @@ func (r *Repo) ProductionPlanReport(dateFrom, dateTo string, lineIDs []int) ([]D
 			&row.ID, &row.PlanDate, &row.LineID, &lineName,
 			&row.ModelID, &row.ComponentID, &row.Label,
 			&row.ArtikulRaqami, &row.OdooCode,
+			&row.Brend, &row.SeriyaRaqami, &row.Modeli, &row.Rangi, &row.GsCodeCount,
 			&row.ShiftNo, &row.PlannedQty, &row.AllowOverplan, &dayStatus,
 		); err != nil {
 			return items, err
@@ -809,7 +889,27 @@ func (r *Repo) ProductionPlanReport(dateFrom, dateTo string, lineIDs []int) ([]D
 		applyProductionPlanActuals(&row, actuals)
 		items = append(items, row)
 	}
-	return items, rows.Err()
+	if err := rows.Err(); err != nil {
+		return items, err
+	}
+
+	eshikItems := make([]DailyPlanItemRow, 0)
+	otherItems := make([]DailyPlanItemRow, 0, len(items))
+	for _, item := range items {
+		if item.LineID == EshikLineID {
+			eshikItems = append(eshikItems, item)
+			continue
+		}
+		otherItems = append(otherItems, item)
+	}
+	if len(eshikItems) > 0 {
+		grouped, err := r.groupEshikDailyPlanItems(eshikItems)
+		if err != nil {
+			return nil, err
+		}
+		otherItems = append(otherItems, grouped...)
+	}
+	return otherItems, nil
 }
 
 func (r *Repo) ProductionPlanDashboard(planDate string) (*PlanDashboardResponse, error) {
@@ -872,6 +972,20 @@ func (r *Repo) ProductionPlanDashboard(planDate string) (*PlanDashboardResponse,
 
 func (r *Repo) ProductionPlanLinePlannedTotal(planDate string, lineID int) (int, error) {
 	planDate = planDateOrToday(planDate)
+	if lineID == EshikLineID {
+		var total int
+		err := r.store.db.QueryRow(`
+			SELECT COALESCE(SUM(max_qty), 0)::int
+			FROM (
+				SELECT MAX(i.planned_qty) AS max_qty
+				FROM production.daily_plan_items i
+				INNER JOIN production.eshik_model_parts p ON p.component_id = i.component_id
+				WHERE i.plan_date = $1::date AND i.line_id = $2
+				GROUP BY p.eshik_model_id, i.shift_no
+			) t`,
+			planDate, lineID).Scan(&total)
+		return total, err
+	}
 	var total int
 	err := r.store.db.QueryRow(`
 		SELECT COALESCE(SUM(planned_qty), 0)
@@ -885,6 +999,20 @@ func (r *Repo) ProductionPlanLineShiftPlannedTotal(planDate string, lineID, shif
 	planDate = planDateOrToday(planDate)
 	if shiftNo != 1 && shiftNo != 2 {
 		return 0, nil
+	}
+	if lineID == EshikLineID {
+		var total int
+		err := r.store.db.QueryRow(`
+			SELECT COALESCE(SUM(max_qty), 0)::int
+			FROM (
+				SELECT MAX(i.planned_qty) AS max_qty
+				FROM production.daily_plan_items i
+				INNER JOIN production.eshik_model_parts p ON p.component_id = i.component_id
+				WHERE i.plan_date = $1::date AND i.line_id = $2 AND i.shift_no = $3
+				GROUP BY p.eshik_model_id
+			) t`,
+			planDate, lineID, shiftNo).Scan(&total)
+		return total, err
 	}
 	var total int
 	err := r.store.db.QueryRow(`
@@ -922,7 +1050,7 @@ func productionPlanSeriyaEndsWithClause(paramIndex int) string {
 
 func (r *Repo) productionPlanTemplateItems(lineID int, modelIDs, componentIDs []int) ([]planTemplateItem, error) {
 	switch {
-	case IsProductionPlanProductLine(lineID):
+	case lineID == YigishLineID, lineID == QadoqlashLineID, IsProductionPlanProductLine(lineID):
 		return r.productionPlanTemplateModels(lineID, modelIDs)
 	case lineID == FinPressLineID:
 		return r.productionPlanTemplateFinPress(componentIDs)
@@ -1036,18 +1164,16 @@ func (r *Repo) productionPlanTemplateKlapan(componentIDs []int) ([]planTemplateI
 	return scanPlanTemplateItems(rows)
 }
 
-func (r *Repo) productionPlanTemplateEshik(componentIDs []int) ([]planTemplateItem, error) {
+func (r *Repo) productionPlanTemplateEshik(modelIDs []int) ([]planTemplateItem, error) {
 	query := `
-		SELECT c.id, COALESCE(NULLIF(c.factory_code, ''), c.manufacturer_code, ''), COALESCE(c.odoo_code, ''), COALESCE(ec.seriya_raqami, ''), COALESCE(c.full_name_uz, ''), ''
-		FROM production.eshik_components ec
-		INNER JOIN production.components c ON c.id = ec.component_id
-		WHERE c.status = true`
+		SELECT m.id, m.model_name, '', '', '', ''
+		FROM production.eshik_models m`
 	args := []any{}
-	if len(componentIDs) > 0 {
-		query += ` AND c.id = ANY($1)`
-		args = append(args, intSliceParam(componentIDs))
+	if len(modelIDs) > 0 {
+		query += ` WHERE m.id = ANY($1)`
+		args = append(args, intSliceParam(modelIDs))
 	}
-	query += ` ORDER BY COALESCE(NULLIF(c.factory_code, ''), c.manufacturer_code, ''), c.id`
+	query += ` ORDER BY m.model_name, m.id`
 
 	rows, err := r.store.db.Query(query, args...)
 	if err != nil {
@@ -1159,6 +1285,15 @@ func (r *Repo) productionPlanMonthMap(yearMonth string, lineID int) (map[int]map
 	defer rows.Close()
 
 	result := map[int]map[string]planMonthCell{}
+	componentKeys := []int{}
+	type rawCell struct {
+		date    string
+		key     int
+		shiftNo int
+		qty     int
+		allow   bool
+	}
+	raw := []rawCell{}
 	for rows.Next() {
 		var dateStr string
 		var key, shiftNo, qty int
@@ -1166,19 +1301,47 @@ func (r *Repo) productionPlanMonthMap(yearMonth string, lineID int) (map[int]map
 		if err := rows.Scan(&dateStr, &key, &shiftNo, &qty, &allow); err != nil {
 			return result, err
 		}
+		raw = append(raw, rawCell{date: dateStr, key: key, shiftNo: shiftNo, qty: qty, allow: allow})
+		if lineID == EshikLineID && key > 0 {
+			componentKeys = append(componentKeys, key)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return result, err
+	}
+
+	modelByComponent := map[int]int{}
+	if lineID == EshikLineID && len(componentKeys) > 0 {
+		modelByComponent, err = r.EshikModelIDsByComponentIDs(componentKeys)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	for _, cell := range raw {
+		key := cell.key
+		if lineID == EshikLineID {
+			if modelID := modelByComponent[cell.key]; modelID > 0 {
+				key = modelID
+			}
+		}
 		if _, ok := result[key]; !ok {
 			result[key] = map[string]planMonthCell{}
 		}
-		cell := result[key][dateStr]
-		cell.AllowOverplan = allow
-		if shiftNo == 2 {
-			cell.Shift2Planned = qty
+		existing := result[key][cell.date]
+		existing.AllowOverplan = existing.AllowOverplan || cell.allow
+		if cell.shiftNo == 2 {
+			if cell.qty > existing.Shift2Planned {
+				existing.Shift2Planned = cell.qty
+			}
 		} else {
-			cell.Shift1Planned = qty
+			if cell.qty > existing.Shift1Planned {
+				existing.Shift1Planned = cell.qty
+			}
 		}
-		result[key][dateStr] = cell
+		result[key][cell.date] = existing
 	}
-	return result, rows.Err()
+	return result, nil
 }
 
 func (r *Repo) lineNameByID(lineID int) (string, error) {
@@ -1438,10 +1601,16 @@ func (r *Repo) productionPlanValidateItemKey(lineID, itemKey int, label string) 
 			WHERE c.id = $1 AND c.status = true`, itemKey).Scan(&dbLabel)
 	case EshikLineID:
 		err = r.store.db.QueryRow(`
-			SELECT COALESCE(NULLIF(c.factory_code, ''), c.manufacturer_code, '')
-			FROM production.eshik_components ec
-			INNER JOIN production.components c ON c.id = ec.component_id
-			WHERE c.id = $1 AND c.status = true`, itemKey).Scan(&dbLabel)
+			SELECT model_name
+			FROM production.eshik_models
+			WHERE id = $1`, itemKey).Scan(&dbLabel)
+		if err != nil {
+			return errors.New("eshik modeli topilmadi")
+		}
+		if label != "" && !strings.EqualFold(strings.TrimSpace(dbLabel), strings.TrimSpace(label)) {
+			return fmt.Errorf("model nomi mos emas: %s", dbLabel)
+		}
+		return nil
 	default:
 		return fmt.Errorf("noto'g'ri line_id: %d", lineID)
 	}
@@ -1682,5 +1851,272 @@ func (r *Repo) ProductionPlanGetMonth(yearMonth string, lineID int, includeActua
 	for _, key := range rowOrder {
 		resp.Rows = append(resp.Rows, *rowMap[key])
 	}
+	if lineID == EshikLineID {
+		resp.Rows, err = r.groupEshikPlanMonthRows(resp.Rows)
+		if err != nil {
+			return nil, err
+		}
+	}
 	return resp, nil
+}
+
+func eshikPairMin(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func eshikPairMax(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+// groupEshikDailyPlanItems merges freeze+ref into one model row.
+// Pair unit: planned = max(parts), actual = min(parts).
+func (r *Repo) groupEshikDailyPlanItems(items []DailyPlanItemRow) ([]DailyPlanItemRow, error) {
+	if len(items) == 0 {
+		return items, nil
+	}
+	componentIDs := make([]int, 0, len(items))
+	for _, item := range items {
+		if item.ComponentID > 0 {
+			componentIDs = append(componentIDs, item.ComponentID)
+		}
+	}
+	modelByComponent, err := r.EshikModelIDsByComponentIDs(componentIDs)
+	if err != nil {
+		return nil, err
+	}
+	modelIDs := make([]int, 0, len(modelByComponent))
+	seenModel := map[int]struct{}{}
+	for _, modelID := range modelByComponent {
+		if _, ok := seenModel[modelID]; ok {
+			continue
+		}
+		seenModel[modelID] = struct{}{}
+		modelIDs = append(modelIDs, modelID)
+	}
+	names, err := r.EshikModelNamesByIDs(modelIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	type groupKey struct {
+		PlanDate string
+		ShiftNo  int
+		ModelID  int
+	}
+	type groupState struct {
+		row      DailyPlanItemRow
+		partSeen int
+	}
+	grouped := map[groupKey]*groupState{}
+	order := []groupKey{}
+	for _, item := range items {
+		modelID := modelByComponent[item.ComponentID]
+		if modelID <= 0 {
+			// Orphan component plan row — keep as-is
+			key := groupKey{PlanDate: item.PlanDate, ShiftNo: item.ShiftNo, ModelID: -item.ComponentID}
+			copyItem := item
+			grouped[key] = &groupState{row: copyItem, partSeen: 1}
+			order = append(order, key)
+			continue
+		}
+		key := groupKey{PlanDate: item.PlanDate, ShiftNo: item.ShiftNo, ModelID: modelID}
+		if existing, ok := grouped[key]; ok {
+			existing.row.PlannedQty = eshikPairMax(existing.row.PlannedQty, item.PlannedQty)
+			existing.row.ActualQty = eshikPairMin(existing.row.ActualQty, item.ActualQty)
+			existing.row.AllowOverplan = existing.row.AllowOverplan || item.AllowOverplan
+			existing.partSeen++
+			continue
+		}
+		copyItem := item
+		copyItem.ModelID = 0
+		copyItem.ComponentID = 0
+		copyItem.ItemKey = modelID
+		copyItem.Label = names[modelID]
+		if copyItem.Label == "" {
+			copyItem.Label = item.Label
+		}
+		copyItem.Modeli = copyItem.Label
+		grouped[key] = &groupState{row: copyItem, partSeen: 1}
+		order = append(order, key)
+	}
+
+	out := make([]DailyPlanItemRow, 0, len(order))
+	for _, key := range order {
+		state := grouped[key]
+		row := state.row
+		// Single mapped part without pair: actual cannot form a complete unit.
+		if key.ModelID > 0 && state.partSeen < 2 {
+			row.ActualQty = 0
+		}
+		row.RemainingQty = row.PlannedQty - row.ActualQty
+		row.CompletionPct = 0
+		if row.PlannedQty > 0 {
+			row.CompletionPct = row.ActualQty * 100 / row.PlannedQty
+		}
+		out = append(out, row)
+	}
+	return out, nil
+}
+
+func (r *Repo) groupEshikPlanMonthRows(rows []PlanMonthGridRow) ([]PlanMonthGridRow, error) {
+	if len(rows) == 0 {
+		return rows, nil
+	}
+	componentIDs := make([]int, 0, len(rows))
+	for _, row := range rows {
+		if row.ComponentID > 0 {
+			componentIDs = append(componentIDs, row.ComponentID)
+		}
+	}
+	modelByComponent, err := r.EshikModelIDsByComponentIDs(componentIDs)
+	if err != nil {
+		return nil, err
+	}
+	modelIDs := make([]int, 0, len(modelByComponent))
+	seenModel := map[int]struct{}{}
+	for _, modelID := range modelByComponent {
+		if _, ok := seenModel[modelID]; ok {
+			continue
+		}
+		seenModel[modelID] = struct{}{}
+		modelIDs = append(modelIDs, modelID)
+	}
+	names, err := r.EshikModelNamesByIDs(modelIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	type dayAccum struct {
+		shift1Planned, shift2Planned int
+		shift1Actual, shift2Actual   int
+		shift1ActualSet, shift2ActualSet bool
+		partsSeen                        int
+	}
+	// Collect parts per model
+	partsByModel := map[int][]int{} // modelID -> componentIDs
+	allowByModel := map[int]bool{}
+	for _, row := range rows {
+		modelID := modelByComponent[row.ComponentID]
+		if modelID <= 0 {
+			continue
+		}
+		partsByModel[modelID] = append(partsByModel[modelID], row.ComponentID)
+		allowByModel[modelID] = allowByModel[modelID] || row.AllowOverplan
+	}
+
+	// Pair unit: planned = max(parts), actual = min(parts).
+	accum := map[int]map[string]*dayAccum{} // modelID -> date -> accum
+
+	for _, row := range rows {
+		modelID := modelByComponent[row.ComponentID]
+		if modelID <= 0 {
+			continue
+		}
+		if _, ok := accum[modelID]; !ok {
+			accum[modelID] = map[string]*dayAccum{}
+		}
+		for date, cell := range row.Days {
+			day := accum[modelID][date]
+			if day == nil {
+				day = &dayAccum{}
+				accum[modelID][date] = day
+			}
+			day.partsSeen++
+			if cell.Shift1.PlannedQty > day.shift1Planned {
+				day.shift1Planned = cell.Shift1.PlannedQty
+			}
+			if cell.Shift2.PlannedQty > day.shift2Planned {
+				day.shift2Planned = cell.Shift2.PlannedQty
+			}
+			if !day.shift1ActualSet {
+				day.shift1Actual = cell.Shift1.ActualQty
+				day.shift1ActualSet = true
+			} else {
+				day.shift1Actual = eshikPairMin(day.shift1Actual, cell.Shift1.ActualQty)
+			}
+			if !day.shift2ActualSet {
+				day.shift2Actual = cell.Shift2.ActualQty
+				day.shift2ActualSet = true
+			} else {
+				day.shift2Actual = eshikPairMin(day.shift2Actual, cell.Shift2.ActualQty)
+			}
+		}
+	}
+
+	out := make([]PlanMonthGridRow, 0, len(partsByModel))
+	modelOrder := make([]int, 0, len(partsByModel))
+	for modelID := range partsByModel {
+		modelOrder = append(modelOrder, modelID)
+	}
+	// Stable-ish: by name
+	for i := 0; i < len(modelOrder); i++ {
+		for j := i + 1; j < len(modelOrder); j++ {
+			if names[modelOrder[j]] < names[modelOrder[i]] {
+				modelOrder[i], modelOrder[j] = modelOrder[j], modelOrder[i]
+			}
+		}
+	}
+
+	for _, modelID := range modelOrder {
+		gridRow := PlanMonthGridRow{
+			ItemKey:       modelID,
+			ModelID:       0,
+			ComponentID:   modelID, // UI aux lines use component_id/item_key as catalog key
+			Label:         names[modelID],
+			AllowOverplan: allowByModel[modelID],
+			Days:          map[string]PlanMonthDayCell{},
+		}
+		for date, day := range accum[modelID] {
+			shift1Actual := day.shift1Actual
+			shift2Actual := day.shift2Actual
+			if day.partsSeen < 2 {
+				shift1Actual = 0
+				shift2Actual = 0
+			}
+			gridRow.Days[date] = PlanMonthDayCell{
+				Shift1: PlanMonthShiftCell{PlannedQty: day.shift1Planned, ActualQty: shift1Actual},
+				Shift2: PlanMonthShiftCell{PlannedQty: day.shift2Planned, ActualQty: shift2Actual},
+			}
+		}
+		out = append(out, gridRow)
+	}
+
+	// Keep orphan component rows that could not be mapped
+	for _, row := range rows {
+		if modelByComponent[row.ComponentID] > 0 {
+			continue
+		}
+		out = append(out, row)
+	}
+	return out, nil
+}
+
+func (r *Repo) EshikModelNamesByIDs(ids []int) (map[int]string, error) {
+	result := map[int]string{}
+	if len(ids) == 0 {
+		return result, nil
+	}
+	rows, err := r.store.db.Query(`
+		SELECT id, model_name
+		FROM production.eshik_models
+		WHERE id = ANY($1)`, intSliceParam(ids))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int
+		var name string
+		if err := rows.Scan(&id, &name); err != nil {
+			return result, err
+		}
+		result[id] = name
+	}
+	return result, rows.Err()
 }

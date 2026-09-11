@@ -550,7 +550,7 @@ export function ProductionPlanMonthGrid({ yearMonth }: Props) {
         Fakt. O&apos;tgan kunlar avtomatik bloklangan — faqat bugun va kelajak tahrirlanadi. Tasdiqlangan kunlarni{" "}
         <Unlock className="inline size-3" /> bilan qayta ochish mumkin (faqat bugun va kelajak).
         {PLAN_AUX_LINE_IDS.includes(lineId as (typeof PLAN_AUX_LINE_IDS)[number])
-          ? " Komponentlar ro'yxati liniya sozlamalaridan."
+          ? " Eshik modellari /production/eshik dan."
           : " T1/T2/T3 — seriya raqami T bilan tugaydi; Ichki — I bilan tugaydi."}
       </p>
     </div>

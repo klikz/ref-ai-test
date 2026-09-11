@@ -58,6 +58,8 @@ type SerialInfoCompressor struct {
 	CompressorSerial string `json:"compressor_serial"`
 	AccSerial        string `json:"acc_serial"`
 	DoorSerial       string `json:"door_serial"`
+	FreezeDoorSerial string `json:"freeze_door_serial"`
+	RefDoorSerial    string `json:"ref_door_serial"`
 	GsCode           string `json:"gscode"`
 	ModelID          int    `json:"model_id"`
 	Modeli           string `json:"modeli"`
@@ -85,6 +87,8 @@ func (r *Repo) SerialInfoLookup(serial string) (SerialInfoResponse, error) {
 			CompressorSerial: params.CompressorSerial,
 			AccSerial:        params.AccSerial,
 			DoorSerial:       params.DoorSerial,
+			FreezeDoorSerial: params.FreezeDoorSerial,
+			RefDoorSerial:    params.RefDoorSerial,
 			GsCode:           params.GsCode,
 			ModelID:          params.ModelID,
 			Modeli:           params.Modeli,

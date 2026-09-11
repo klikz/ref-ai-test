@@ -2,7 +2,8 @@ import { ShowErrorToast } from "@/components/showToast"
 import { Backend_Request } from "@/services/backend"
 import { useEffect, useState } from "react"
 
-export const PRODUCT_LINE_IDS = [4, 5, 6, 7] as const
+/** Yi'g'ish, T1–T3, Qadoqlash — mahsulot (serial) balansi. */
+export const PRODUCT_LINE_IDS = [1, 4, 5, 6, 7, 12] as const
 
 export type Line = {
   line_id: number
@@ -212,7 +213,7 @@ export async function buildProductBalanceWorkbook(params: {
 }) {
   const ExcelJS = await import("exceljs")
   const workbook = new ExcelJS.Workbook()
-  workbook.creator = "Premier AC"
+  workbook.creator = "Premier REF"
   workbook.created = new Date()
 
   const totalCount = params.summary.reduce((sum, row) => sum + row.count, 0)

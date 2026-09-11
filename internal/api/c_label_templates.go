@@ -70,6 +70,26 @@ func (s *ServerModel) LabelTemplateCreate(c *gin.Context) {
 	if v, ok := jsonMap["print_rotation_deg"].(float64); ok {
 		printRotationDeg = int(v)
 	}
+	density := 8
+	if v, ok := jsonMap["density"].(float64); ok {
+		density = int(v)
+	}
+	speed := 4
+	if v, ok := jsonMap["speed"].(float64); ok {
+		speed = int(v)
+	}
+	gapMm := 2.0
+	if v, ok := jsonMap["gap_mm"].(float64); ok {
+		gapMm = v
+	}
+	usePrinterDefaults := true
+	if v, ok := jsonMap["use_printer_defaults"].(bool); ok {
+		usePrinterDefaults = v
+	}
+	sizeOnly := false
+	if v, ok := jsonMap["size_only"].(bool); ok {
+		sizeOnly = v
+	}
 
 	var definition json.RawMessage
 	if raw, ok := jsonMap["definition"]; ok && raw != nil {
@@ -81,7 +101,10 @@ func (s *ServerModel) LabelTemplateCreate(c *gin.Context) {
 	}
 
 	userID := c.GetInt("user_id")
-	id, err := s.Store.Repo().LabelTemplateCreate(name, lineID, widthMm, heightMm, dpi, printRotationDeg, definition, userID)
+	id, err := s.Store.Repo().LabelTemplateCreate(
+		name, lineID, widthMm, heightMm, dpi, printRotationDeg,
+		density, speed, gapMm, usePrinterDefaults, sizeOnly, definition, userID,
+	)
 	if err != nil {
 		s.Utils.SendError(c, err, "LabelTemplateCreate", "")
 		return
@@ -163,6 +186,26 @@ func (s *ServerModel) LabelTemplateUpdate(c *gin.Context) {
 	if v, ok := jsonMap["print_rotation_deg"].(float64); ok {
 		printRotationDeg = int(v)
 	}
+	density := 8
+	if v, ok := jsonMap["density"].(float64); ok {
+		density = int(v)
+	}
+	speed := 4
+	if v, ok := jsonMap["speed"].(float64); ok {
+		speed = int(v)
+	}
+	gapMm := 2.0
+	if v, ok := jsonMap["gap_mm"].(float64); ok {
+		gapMm = v
+	}
+	usePrinterDefaults := true
+	if v, ok := jsonMap["use_printer_defaults"].(bool); ok {
+		usePrinterDefaults = v
+	}
+	sizeOnly := false
+	if v, ok := jsonMap["size_only"].(bool); ok {
+		sizeOnly = v
+	}
 
 	var definition json.RawMessage
 	if raw, ok := jsonMap["definition"]; ok && raw != nil {
@@ -173,7 +216,10 @@ func (s *ServerModel) LabelTemplateUpdate(c *gin.Context) {
 		}
 	}
 
-	err = s.Store.Repo().LabelTemplateUpdate(id, name, lineID, widthMm, heightMm, dpi, printRotationDeg, definition)
+	err = s.Store.Repo().LabelTemplateUpdate(
+		id, name, lineID, widthMm, heightMm, dpi, printRotationDeg,
+		density, speed, gapMm, usePrinterDefaults, sizeOnly, definition,
+	)
 	if err != nil {
 		s.Utils.SendError(c, err, "LabelTemplateUpdate", "")
 		return

@@ -25,7 +25,15 @@ import {
 } from "@/components/ui/table"
 import { ShowErrorToast, ShowOKToast } from "@/components/showToast"
 import { cn } from "@/lib/utils"
-import { currentYearMonth, downloadPlanExport, todayDateInput, type PlanItemRow } from "./production_plan_shared"
+import {
+  PLAN_LINES,
+  allPlanLineIds,
+  currentYearMonth,
+  downloadPlanExport,
+  isPlanProductLine,
+  todayDateInput,
+  type PlanItemRow,
+} from "./production_plan_shared"
 
 type FilterOption = {
   value: string
@@ -52,16 +60,20 @@ function uniqueOptionsFromRows(
     .map((value) => ({ value, label: value }))
 }
 
-function uniqueLineOptionsFromRows(rows: PlanItemRow[]): FilterOption[] {
-  const byId = new Map<number, string>()
-  for (const row of rows) {
-    if (row.line_id > 0) {
-      byId.set(row.line_id, String(row.line_name || row.line_id).trim())
-    }
+const PLAN_LINE_OPTIONS: FilterOption[] = PLAN_LINES.map((line) => ({
+  value: String(line.line_id),
+  label: line.name,
+}))
+
+function itemName(row: PlanItemRow) {
+  return String(row.label || row.modeli || "").trim()
+}
+
+function itemSecondary(row: PlanItemRow) {
+  if (isPlanProductLine(row.line_id)) {
+    return String(row.artikul_raqami ?? "").trim()
   }
-  return Array.from(byId.entries())
-    .sort((a, b) => a[1].localeCompare(b[1]))
-    .map(([id, label]) => ({ value: String(id), label }))
+  return String(row.artikul_raqami || row.label || "").trim()
 }
 
 function applyDatePreset(type: "month" | "year") {
@@ -198,15 +210,22 @@ export default function ProductionPlanReportPage() {
   const [loading, setLoading] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [tableExporting, setTableExporting] = useState(false)
-  const [selectedArtikuls, setSelectedArtikuls] = useState<string[]>([])
+  const [selectedNames, setSelectedNames] = useState<string[]>([])
   const [selectedOdooCodes, setSelectedOdooCodes] = useState<string[]>([])
-  const [selectedKorxonaKodlari, setSelectedKorxonaKodlari] = useState<string[]>([])
+  const [selectedSeriyas, setSelectedSeriyas] = useState<string[]>([])
   const [selectedLineIds, setSelectedLineIds] = useState<string[]>([])
+
+  const requestLineIds = useMemo(() => {
+    if (selectedLineIds.length === 0) {
+      return allPlanLineIds()
+    }
+    return selectedLineIds.map((value) => Number(value)).filter((id) => id > 0)
+  }, [selectedLineIds])
 
   const load = useCallback(async () => {
     setLoading(true)
     const result = await Backend_Request<PlanItemRow[]>(
-      { date_from: dateFrom, date_to: dateTo },
+      { date_from: dateFrom, date_to: dateTo, line_ids: requestLineIds },
       "/api/production/plan/report",
     )
     setLoading(false)
@@ -216,14 +235,14 @@ export default function ProductionPlanReportPage() {
       setRows([])
       ShowErrorToast(result.error || "Hisobot yuklanmadi")
     }
-  }, [dateFrom, dateTo])
+  }, [dateFrom, dateTo, requestLineIds])
 
   useEffect(() => {
     void load()
   }, [load])
 
-  const artikulOptions = useMemo(
-    () => uniqueOptionsFromRows(rows, (row) => row.artikul_raqami),
+  const nameOptions = useMemo(
+    () => uniqueOptionsFromRows(rows, (row) => itemName(row)),
     [rows],
   )
 
@@ -232,36 +251,29 @@ export default function ProductionPlanReportPage() {
     [rows],
   )
 
-  const korxonaKodiOptions = useMemo(
-    () => uniqueOptionsFromRows(rows, (row) => row.label),
+  const seriyaOptions = useMemo(
+    () => uniqueOptionsFromRows(rows, (row) => row.seriya_raqami ?? ""),
     [rows],
   )
 
-  const lineOptions = useMemo(() => uniqueLineOptionsFromRows(rows), [rows])
-
   const filteredRows = useMemo(() => {
     const odooCodeSet = new Set(selectedOdooCodes)
-    const artikulSet = new Set(selectedArtikuls)
-    const korxonaKodiSet = new Set(selectedKorxonaKodlari)
-    const lineIdSet = new Set(selectedLineIds.map((value) => Number(value)))
+    const nameSet = new Set(selectedNames)
+    const seriyaSet = new Set(selectedSeriyas)
 
     return rows.filter((row) => {
-      const artikul = String(row.artikul_raqami ?? "").trim()
+      const name = itemName(row)
       const odooCode = String(row.odoo_code ?? "").trim()
-      const korxonaKodi = String(row.label ?? "").trim()
+      const seriya = String(row.seriya_raqami ?? "").trim()
 
-      const artikulOk =
-        artikulSet.size === 0 || (artikul !== "" && artikulSet.has(artikul))
+      const nameOk = nameSet.size === 0 || (name !== "" && nameSet.has(name))
       const odooCodeOk =
         odooCodeSet.size === 0 || (odooCode !== "" && odooCodeSet.has(odooCode))
-      const korxonaKodiOk =
-        korxonaKodiSet.size === 0 || (korxonaKodi !== "" && korxonaKodiSet.has(korxonaKodi))
-      const lineOk =
-        lineIdSet.size === 0 || (row.line_id > 0 && lineIdSet.has(row.line_id))
+      const seriyaOk = seriyaSet.size === 0 || (seriya !== "" && seriyaSet.has(seriya))
 
-      return artikulOk && odooCodeOk && korxonaKodiOk && lineOk
+      return nameOk && odooCodeOk && seriyaOk
     })
-  }, [rows, selectedArtikuls, selectedOdooCodes, selectedKorxonaKodlari, selectedLineIds])
+  }, [rows, selectedNames, selectedOdooCodes, selectedSeriyas])
 
   async function exportMonth() {
     const ym = dateFrom.slice(0, 7) || currentYearMonth()
@@ -289,8 +301,10 @@ export default function ProductionPlanReportPage() {
         Sana: row.plan_date,
         Liniya: row.line_name || row.line_id,
         Smena: `${row.shift_no || 1}-sm`,
-        "Korxonda kodi": row.label,
-        Artikul: row.artikul_raqami,
+        "Model / komponent": itemName(row),
+        "Qisqa nomi": itemSecondary(row),
+        Seriya: row.seriya_raqami ?? "",
+        Rangi: row.rangi ?? "",
         "ODOO code": row.odoo_code,
         Reja: row.planned_qty,
         Fakt: row.actual_qty,
@@ -318,7 +332,7 @@ export default function ProductionPlanReportPage() {
   return (
     <PageContainer
       title="Reja va bajarilish"
-      description="Reja va fakt taqqoslash"
+      description="Boshlang'ich yig'uv, Eshik va Yakuniy yig'uv uchastkalari — reja va fakt"
       fullWidth
       actions={
         <Button variant="outline" asChild>
@@ -387,12 +401,32 @@ export default function ProductionPlanReportPage() {
             <div className="space-y-4">
               <div className="grid gap-4 sm:grid-cols-2">
                 <MultiSelectSearchDropdown
-                  label="Artikul"
-                  selectedValues={selectedArtikuls}
-                  options={artikulOptions}
-                  emptyLabel="Barcha artikullar"
-                  searchPlaceholder="Artikul qidirish..."
-                  onChange={setSelectedArtikuls}
+                  label="Liniya"
+                  selectedValues={selectedLineIds}
+                  options={PLAN_LINE_OPTIONS}
+                  emptyLabel="Barcha liniyalar (Boshlang'ich, Eshik, Yakuniy)"
+                  searchPlaceholder="Liniya qidirish..."
+                  onChange={setSelectedLineIds}
+                />
+
+                <MultiSelectSearchDropdown
+                  label="Model / komponent"
+                  selectedValues={selectedNames}
+                  options={nameOptions}
+                  emptyLabel="Barchasi"
+                  searchPlaceholder="Model yoki komponent..."
+                  onChange={setSelectedNames}
+                />
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <MultiSelectSearchDropdown
+                  label="Seriya"
+                  selectedValues={selectedSeriyas}
+                  options={seriyaOptions}
+                  emptyLabel="Barcha seriyalar"
+                  searchPlaceholder="Seriya qidirish..."
+                  onChange={setSelectedSeriyas}
                 />
 
                 <MultiSelectSearchDropdown
@@ -402,26 +436,6 @@ export default function ProductionPlanReportPage() {
                   emptyLabel="Barcha Odoo Code"
                   searchPlaceholder="Odoo Code qidirish..."
                   onChange={setSelectedOdooCodes}
-                />
-              </div>
-
-              <div className="grid gap-4 sm:grid-cols-2">
-                <MultiSelectSearchDropdown
-                  label="Korxona kodi"
-                  selectedValues={selectedKorxonaKodlari}
-                  options={korxonaKodiOptions}
-                  emptyLabel="Barcha kodlar"
-                  searchPlaceholder="Korxona kodi qidirish..."
-                  onChange={setSelectedKorxonaKodlari}
-                />
-
-                <MultiSelectSearchDropdown
-                  label="Liniya"
-                  selectedValues={selectedLineIds}
-                  options={lineOptions}
-                  emptyLabel="Barcha liniyalar"
-                  searchPlaceholder="Liniya qidirish..."
-                  onChange={setSelectedLineIds}
                 />
               </div>
             </div>
@@ -467,8 +481,10 @@ export default function ProductionPlanReportPage() {
                 <TableHead>Sana</TableHead>
                 <TableHead>Liniya</TableHead>
                 <TableHead>Smena</TableHead>
-                <TableHead>Korxonda kodi</TableHead>
-                <TableHead>Artikul</TableHead>
+                <TableHead>Model / komponent</TableHead>
+                <TableHead>Qisqa nomi</TableHead>
+                <TableHead>Seriya</TableHead>
+                <TableHead>Rangi</TableHead>
                 <TableHead>ODOO code</TableHead>
                 <TableHead className="text-right">Reja</TableHead>
                 <TableHead className="text-right">Fakt</TableHead>
@@ -482,8 +498,10 @@ export default function ProductionPlanReportPage() {
                   <TableCell className="tabular-nums">{row.plan_date}</TableCell>
                   <TableCell>{row.line_name || row.line_id}</TableCell>
                   <TableCell className="tabular-nums">{row.shift_no || 1}-sm</TableCell>
-                  <TableCell className="font-medium">{row.label}</TableCell>
-                  <TableCell className="tabular-nums">{row.artikul_raqami}</TableCell>
+                  <TableCell className="font-medium">{itemName(row)}</TableCell>
+                  <TableCell className="tabular-nums">{itemSecondary(row)}</TableCell>
+                  <TableCell className="tabular-nums">{row.seriya_raqami}</TableCell>
+                  <TableCell>{row.rangi}</TableCell>
                   <TableCell className="tabular-nums">{row.odoo_code}</TableCell>
                   <TableCell className="text-right tabular-nums">{row.planned_qty}</TableCell>
                   <TableCell className="text-right tabular-nums">{row.actual_qty}</TableCell>
@@ -500,7 +518,7 @@ export default function ProductionPlanReportPage() {
               ))}
               {!loading && filteredRows.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={10} className="h-20 text-center text-muted-foreground">
+                  <TableCell colSpan={12} className="h-20 text-center text-muted-foreground">
                     Ma&apos;lumot yo&apos;q
                   </TableCell>
                 </TableRow>

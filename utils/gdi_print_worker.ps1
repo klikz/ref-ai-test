@@ -10,7 +10,8 @@ function Invoke-LabelPrint {
         [int]$Copies,
         [string]$DocumentName,
         [string]$OutputPath,
-        [int]$RotationDeg = 0
+        [int]$RotationDeg = 0,
+        [bool]$ForcePaperSize = $false
     )
 
     if ($Copies -lt 1) { $Copies = 1 }
@@ -29,15 +30,42 @@ function Invoke-LabelPrint {
             $pd.PrinterSettings.PrintFileName = $OutputPath
         }
 
-        $width = [int][Math]::Round($WidthMm / 25.4 * 100)
-        $height = [int][Math]::Round($HeightMm / 25.4 * 100)
-        if ($width -lt 1) { $width = 1 }
-        if ($height -lt 1) { $height = 1 }
-
+        # Always zero margins: default ~1" MarginBounds shrinks content on small labels.
         $pd.DefaultPageSettings.Margins = New-Object System.Drawing.Printing.Margins(0, 0, 0, 0)
         $pd.OriginAtMargins = $false
-        $paper = New-Object System.Drawing.Printing.PaperSize('LabelV2', $width, $height)
-        $pd.DefaultPageSettings.PaperSize = $paper
+        $pd.DefaultPageSettings.Landscape = $false
+
+        # Caller passes physical media size (already swapped for album/90°).
+        # Must set PaperSize — otherwise PDF/default page stays A4 and only content looks rotated.
+        if ($WidthMm -gt 0 -and $HeightMm -gt 0) {
+            $wantW = [int][Math]::Round($WidthMm / 25.4 * 100)
+            $wantH = [int][Math]::Round($HeightMm / 25.4 * 100)
+            if ($wantW -lt 1) { $wantW = 1 }
+            if ($wantH -lt 1) { $wantH = 1 }
+
+            $tol = 20 # ~5mm
+            $matched = $null
+            foreach ($candidate in @($pd.PrinterSettings.PaperSizes)) {
+                $ok = (
+                    [Math]::Abs([int]$candidate.Width - $wantW) -le $tol -and
+                    [Math]::Abs([int]$candidate.Height - $wantH) -le $tol
+                )
+                if ($ok) {
+                    $matched = $candidate
+                    break
+                }
+            }
+            if ($null -ne $matched) {
+                $pd.DefaultPageSettings.PaperSize = $matched
+            } elseif ($ForcePaperSize -eq $true -or -not [string]::IsNullOrWhiteSpace($OutputPath) -or $PrinterName -eq 'Microsoft Print to PDF') {
+                # Custom size for PDF/generic only. Thermal drivers: avoid custom PaperSize
+                # (resets private DEVMODE — darkness/speed fall back to factory defaults).
+                $custom = New-Object System.Drawing.Printing.PaperSize('ACLabel', $wantW, $wantH)
+                [void]$pd.PrinterSettings.PaperSizes.Add($custom)
+                $pd.DefaultPageSettings.PaperSize = $custom
+            }
+            # else: keep driver default paper; image still drawn into PageBounds
+        }
 
         $script:pagesLeft = $Copies
         $handler = [System.Drawing.Printing.PrintPageEventHandler]{
@@ -46,12 +74,22 @@ function Invoke-LabelPrint {
             $g.PageUnit = [System.Drawing.GraphicsUnit]::Display
             $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::NearestNeighbor
             $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::Half
+
+            $bounds = $e.PageBounds
+            if ($bounds.Width -lt 1 -or $bounds.Height -lt 1) {
+                $bounds = $e.MarginBounds
+            }
+
+            # Image is pre-rotated in Go for 90°; draw 1:1 into media bounds (no stretch-rotate).
             if ($RotationDeg -eq 90) {
-                $g.TranslateTransform($width / 2.0, $height / 2.0)
+                # Legacy fallback if caller still sends unrotated bitmap + RotationDeg=90.
+                $cx = $bounds.X + $bounds.Width / 2.0
+                $cy = $bounds.Y + $bounds.Height / 2.0
+                $g.TranslateTransform($cx, $cy)
                 $g.RotateTransform(90)
-                $g.DrawImage($img, -$width / 2.0, -$height / 2.0, $width, $height)
+                $g.DrawImage($img, -$bounds.Height / 2.0, -$bounds.Width / 2.0, $bounds.Height, $bounds.Width)
             } else {
-                $g.DrawImage($img, 0, 0, $width, $height)
+                $g.DrawImage($img, $bounds.X, $bounds.Y, $bounds.Width, $bounds.Height)
             }
             $script:pagesLeft--
             $e.HasMorePages = ($script:pagesLeft -gt 0)
@@ -71,8 +109,12 @@ while ($true) {
     $line = [Console]::In.ReadLine()
     if ($null -eq $line) { break }
     if ($line -eq 'EXIT') { break }
+    # Replies echo ReqId so the client can drop a reply to an abandoned request
+    # instead of restarting this worker over one desynced line.
+    $reqId = 0
     try {
         $job = $line | ConvertFrom-Json
+        if ($null -ne $job.ReqId) { $reqId = [uint64]$job.ReqId }
         Invoke-LabelPrint `
             -ImagePath $job.ImagePath `
             -PrinterName $job.PrinterName `
@@ -81,10 +123,12 @@ while ($true) {
             -Copies ([int]$job.Copies) `
             -DocumentName $job.DocumentName `
             -OutputPath $job.OutputPath `
-            -RotationDeg ([int]$job.RotationDeg)
-        [Console]::Out.WriteLine('OK')
+            -RotationDeg ([int]$job.RotationDeg) `
+            -ForcePaperSize ([bool]$job.ForcePaperSize)
+        [Console]::Out.WriteLine("OK $reqId 0")
     } catch {
-        [Console]::Out.WriteLine(('ERR:' + $_.Exception.Message))
+        $msg = ($_.Exception.Message -replace '[\r\n]+', ' ')
+        [Console]::Out.WriteLine("ERR $reqId $msg")
     }
     [Console]::Out.Flush()
 }

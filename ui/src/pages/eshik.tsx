@@ -28,20 +28,28 @@ type PrinterV2 = {
   label_template_name?: string
 }
 
-type EshikComponent = {
+type EshikPart = {
   id: number
+  door_code: string
   component_id: number
-  factory_code: string
-  full_name_uz: string
-  comment?: string
+  factory_code?: string
   seriya_raqami: string
   index1: string
   index2: string
+}
+
+type EshikModel = {
+  id: number
+  model_name: string
+  freeze: EshikPart
+  ref: EshikPart
 } & PlanProgressFields
 
 type EshikSession = {
   session_id: number
-  eshik_component_id: number
+  eshik_model_id: number
+  door_code: string
+  model_name: string
   factory_code: string
   full_name_uz: string
   serial: string
@@ -52,11 +60,17 @@ type EshikSession = {
 
 type PrintResponse = {
   serial?: string
-  counter?: number
+  parts?: { door_code?: string; serial?: string }[]
 }
 
-function EshikPlanComponentButton({ item, busy, done, disabled, onClick }: {
-  item: EshikComponent
+function EshikPlanModelButton({
+  item,
+  busy,
+  done,
+  disabled,
+  onClick,
+}: {
+  item: EshikModel
   busy: boolean
   done: boolean
   disabled: boolean
@@ -79,28 +93,24 @@ function EshikPlanComponentButton({ item, busy, done, disabled, onClick }: {
       )}
     >
       <div className="space-y-2.5">
-        <div className="font-semibold leading-snug">{item.full_name_uz || item.factory_code}</div>
+        <div className="font-semibold leading-snug">{item.model_name}</div>
         <dl className="grid gap-1 text-xs leading-snug sm:text-sm">
           <div className="grid grid-cols-[7.5rem_1fr] gap-2">
-            <dt className="opacity-75">Factory code</dt>
-            <dd className="min-w-0 break-words font-medium">{item.factory_code || "—"}</dd>
+            <dt className="opacity-75">Freeze</dt>
+            <dd className="min-w-0 break-words font-mono font-medium">
+              {item.freeze?.seriya_raqami || "—"} · {item.freeze?.index1 || "—"}/{item.freeze?.index2 || "—"}
+            </dd>
           </div>
           <div className="grid grid-cols-[7.5rem_1fr] gap-2">
-            <dt className="opacity-75">Comment</dt>
-            <dd className="min-w-0 break-words font-medium">{item.comment?.trim() || "—"}</dd>
-          </div>
-          <div className="grid grid-cols-[7.5rem_1fr] gap-2">
-            <dt className="opacity-75">Prefix</dt>
-            <dd className="font-medium font-mono">{item.seriya_raqami || "—"}</dd>
-          </div>
-          <div className="grid grid-cols-[7.5rem_1fr] gap-2">
-            <dt className="opacity-75">Index 1 / 2</dt>
-            <dd className="font-medium">{item.index1 || "—"} / {item.index2 || "—"}</dd>
+            <dt className="opacity-75">Ref</dt>
+            <dd className="min-w-0 break-words font-mono font-medium">
+              {item.ref?.seriya_raqami || "—"} · {item.ref?.index1 || "—"}/{item.ref?.index2 || "—"}
+            </dd>
           </div>
         </dl>
         <div className={cn("space-y-2 border-t pt-2.5", done ? "border-current/20" : "border-primary-foreground/20")}>
           <div className="grid grid-cols-[7.5rem_1fr_auto] items-center gap-2 text-xs sm:text-sm">
-            <span className="opacity-75">Reja</span>
+            <span className="opacity-75">Reja (eshik)</span>
             <span className="font-semibold tabular-nums">
               {item.actual_qty}/{item.planned_qty}
             </span>
@@ -127,7 +137,9 @@ function normalizeSessions(data: unknown): EshikSession[] {
       const record = row as Record<string, unknown>
       return {
         session_id: Number(record.session_id ?? record.id ?? 0),
-        eshik_component_id: Number(record.eshik_component_id ?? 0),
+        eshik_model_id: Number(record.eshik_model_id ?? 0),
+        door_code: String(record.door_code ?? ""),
+        model_name: String(record.model_name ?? ""),
         factory_code: String(record.factory_code ?? ""),
         full_name_uz: String(record.full_name_uz ?? ""),
         serial: String(record.serial ?? ""),
@@ -140,7 +152,7 @@ function normalizeSessions(data: unknown): EshikSession[] {
 }
 
 export default function EshikPage() {
-  const [items, setItems] = useState<EshikComponent[]>([])
+  const [items, setItems] = useState<EshikModel[]>([])
   const [planStatus, setPlanStatus] = useState("")
   const [planDate, setPlanDate] = useState("")
   const [shiftLabel, setShiftLabel] = useState("")
@@ -152,26 +164,26 @@ export default function EshikPage() {
   const [reprintingSessionId, setReprintingSessionId] = useState(0)
 
   const loadPlanItems = useCallback(async () => {
-    const [componentsResult, planResult] = await Promise.all([
-      Backend_Request<EshikComponent[]>({}, "/api/production/eshik/all"),
+    const [modelsResult, planResult] = await Promise.all([
+      Backend_Request<EshikModel[]>({}, "/api/production/eshik/all"),
       fetchPlanDay(ESHIK_LINE_ID, undefined, { currentShift: true }),
     ])
 
-    if (componentsResult.result !== "ok") {
-      ShowErrorToast(componentsResult.error || "Komponentlar yuklanmadi")
+    if (modelsResult.result !== "ok") {
+      ShowErrorToast(modelsResult.error || "Modellar yuklanmadi")
       setItems([])
       return
     }
 
-    const all = componentsResult.data ?? []
+    const all = modelsResult.data ?? []
     const { status, planByKey, plannedIds } = parseLockedPlanDay(planResult)
     setPlanStatus(status)
     setPlanDate(planResult.result === "ok" && planResult.data ? planResult.data.plan_date || "" : "")
     setShiftLabel(planResult.result === "ok" && planResult.data ? planResult.data.current_shift?.label || "" : "")
 
     setItems(
-      filterItemsByPlannedIds(all, plannedIds, (item) => item.component_id || item.id).map((item) =>
-        attachPlanProgress(item, planByKey, (row) => row.component_id || row.id),
+      filterItemsByPlannedIds(all, plannedIds, (item) => item.id).map((item) =>
+        attachPlanProgress(item, planByKey, (row) => row.id),
       ),
     )
   }, [])
@@ -216,7 +228,7 @@ export default function EshikPage() {
     [printerId, printers],
   )
 
-  async function printComponent(item: EshikComponent) {
+  async function printModel(item: EshikModel) {
     if (!printerId) {
       ShowErrorToast("Printer tanlang")
       return
@@ -227,15 +239,19 @@ export default function EshikPage() {
     }
     setPrintingId(item.id)
     const result = await Backend_Request<PrintResponse>(
-      { eshik_component_id: item.id, printer_v2_id: printerId, copy: 1 },
+      { eshik_model_id: item.id, printer_v2_id: printerId, copy: 1 },
       "/api/lines/eshik/v2/print",
     )
     setPrintingId(0)
     if (result.result !== "ok") {
       ShowErrorToast(result.error || "Chop etilmadi")
+      // Print fail after commit still leaves sessions/balance — refresh for reprint.
+      await Promise.all([loadPlanItems(), loadLast()])
       return
     }
-    ShowOKToast(result.data?.serial ? `Chop etildi: ${result.data.serial}` : "Chop etildi")
+    const parts = result.data?.parts ?? []
+    const serials = parts.map((part) => part.serial).filter(Boolean)
+    ShowOKToast(serials.length ? `Chop etildi: ${serials.join(" · ")}` : "Chop etildi (freeze + ref)")
     await Promise.all([loadPlanItems(), loadLast()])
   }
 
@@ -259,7 +275,7 @@ export default function EshikPage() {
 
   return (
     <PageContainer
-      title="Eshik liniyasi"
+      title="Eshik yig'uv va eshikka PPU quyish uchastkasi"
       description={[planDate, shiftLabel, planStatus ? `Reja: ${planStatus}` : ""]
         .filter(Boolean)
         .join(" · ")}
@@ -287,10 +303,10 @@ export default function EshikPage() {
       }
     >
       <Panel
-        title="Rejadagi komponentlar"
+        title="Rejadagi modellar"
         description={
           planStatus === "locked"
-            ? undefined
+            ? "Bir bosishda freeze va ref chop etiladi"
             : "Reja lock qilingandan keyin chop etish mumkin"
         }
       >
@@ -301,7 +317,7 @@ export default function EshikPage() {
           </div>
         ) : items.length === 0 ? (
           <div className="py-16 text-center text-muted-foreground">
-            Joriy smenada rejadagi komponent yo‘q
+            Joriy smenada rejadagi model yo‘q
           </div>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -309,13 +325,13 @@ export default function EshikPage() {
               const busy = printingId === item.id
               const done = item.planned_qty > 0 && item.actual_qty >= item.planned_qty && !item.allow_overplan
               return (
-                <EshikPlanComponentButton
+                <EshikPlanModelButton
                   key={item.id}
                   item={item}
                   busy={busy}
                   done={done}
                   disabled={busy || !printerId || planStatus !== "locked" || done}
-                  onClick={() => printComponent(item)}
+                  onClick={() => printModel(item)}
                 />
               )
             })}
@@ -336,7 +352,7 @@ export default function EshikPage() {
               <thead className="bg-muted/50 text-left">
                 <tr>
                   <th className="px-4 py-3 font-medium">Serial</th>
-                  <th className="px-4 py-3 font-medium">Komponent</th>
+                  <th className="px-4 py-3 font-medium">Model / eshik</th>
                   <th className="px-4 py-3 font-medium">Vaqt</th>
                   <th className="w-14 px-2 py-3" />
                 </tr>
@@ -348,10 +364,11 @@ export default function EshikPage() {
                     <tr key={row.session_id} className="border-t">
                       <td className="px-4 py-3 font-mono text-xs sm:text-sm">{row.serial}</td>
                       <td className="px-4 py-3">
-                        <div className="font-medium">{row.full_name_uz || row.factory_code}</div>
-                        {row.factory_code ? (
-                          <div className="text-xs text-muted-foreground">{row.factory_code}</div>
-                        ) : null}
+                        <div className="font-medium">{row.model_name || row.full_name_uz || row.factory_code}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {row.door_code || "—"}
+                          {row.factory_code ? ` · ${row.factory_code}` : ""}
+                        </div>
                       </td>
                       <td className="px-4 py-3 text-muted-foreground">{row.c_time}</td>
                       <td className="px-2 py-2 text-right">

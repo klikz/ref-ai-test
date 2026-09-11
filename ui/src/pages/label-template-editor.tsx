@@ -14,13 +14,21 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
+  applyLabelElementDragFromOrigins,
   createDefaultElement,
   createElementId,
   createTableElement,
+  createVerticalLineElement,
   DEFAULT_LABEL_DEFINITION,
+  expandSelectionWithGroups,
+  groupLabelElements,
   normalizeElement,
   offsetAllLabelElements,
   parseDefinition,
+  scaleAllLabelElements,
+  scaleTableColWidthsToWidth,
+  selectionHasGroup,
+  ungroupLabelElements,
   type LabelDefinition,
   type LabelElement,
   type LabelElementType,
@@ -49,22 +57,33 @@ export default function LabelTemplateEditorPage() {
   const [heightMm, setHeightMm] = useState(50)
   const [dpi, setDpi] = useState(203)
   const [printRotationDeg, setPrintRotationDeg] = useState<LabelPrintRotationDeg>(0)
+  const [density, setDensity] = useState(8)
+  const [speed, setSpeed] = useState(4)
+  const [gapMm, setGapMm] = useState(2)
+  const [usePrinterDefaults, setUsePrinterDefaults] = useState(false)
+  const [sizeOnly, setSizeOnly] = useState(false)
   const [definition, setDefinition] = useState<LabelDefinition>(DEFAULT_LABEL_DEFINITION)
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [uploadingImage, setUploadingImage] = useState(false)
   const [uploadingBrand, setUploadingBrand] = useState<string | null>(null)
   const [tableDropAt, setTableDropAt] = useState<{ xMm: number; yMm: number } | null>(null)
-  const [previewSerial, setPreviewSerial] = useState("ABC123456789")
-  const [previewAccSerial, setPreviewAccSerial] = useState("ACC001234")
   const [brands, setBrands] = useState<string[]>([])
   const [brandLogos, setBrandLogos] = useState<BrandLogoMap>({})
+
+  const previewSerial = "ABC123456789"
+  const previewAccSerial = "ACC001234"
 
   const previewSampleData = buildLabelPreviewData({
     serial: previewSerial,
     acc_serial: previewAccSerial,
   })
 
-  const selectedElement = definition.elements.find((el) => el.id === selectedId) ?? null
+  const selectedElement =
+    selectedIds.length === 1
+      ? (definition.elements.find((el) => el.id === selectedIds[0]) ?? null)
+      : null
+  const canGroup = selectedIds.length >= 2
+  const canUngroup = selectionHasGroup(definition.elements, selectedIds)
 
   const loadTemplate = useCallback(async () => {
     if (!templateId) {
@@ -82,6 +101,11 @@ export default function LabelTemplateEditorPage() {
       setHeightMm(t.height_mm)
       setDpi(t.dpi)
       setPrintRotationDeg(t.print_rotation_deg === 90 ? 90 : 0)
+      setDensity(typeof t.density === "number" ? t.density : 8)
+      setSpeed(typeof t.speed === "number" ? t.speed : 4)
+      setGapMm(typeof t.gap_mm === "number" ? t.gap_mm : 2)
+      setUsePrinterDefaults(Boolean(t.use_printer_defaults))
+      setSizeOnly(Boolean(t.size_only))
       setDefinition(parseDefinition(t.definition))
     } else {
       toast.error(result.error || "Shablon topilmadi")
@@ -125,6 +149,11 @@ export default function LabelTemplateEditorPage() {
         height_mm: heightMm,
         dpi,
         print_rotation_deg: printRotationDeg,
+        density,
+        speed,
+        gap_mm: gapMm,
+        use_printer_defaults: usePrinterDefaults,
+        size_only: sizeOnly,
         definition,
       },
       "/api/tech/label-templates/update",
@@ -138,9 +167,13 @@ export default function LabelTemplateEditorPage() {
     }
   }
 
-  function addElementAt(type: LabelElementType, xMm: number, yMm: number) {
+  function addElementAt(type: LabelElementType | "vline", xMm: number, yMm: number) {
     if (type === "table") {
       setTableDropAt({ xMm, yMm })
+      return
+    }
+    if (type === "vline") {
+      placeElement(createVerticalLineElement(), xMm, yMm)
       return
     }
     placeElement(createDefaultElement(type), xMm, yMm)
@@ -169,13 +202,24 @@ export default function LabelTemplateEditorPage() {
       ...prev,
       elements: [...prev.elements, el],
     }))
-    setSelectedId(el.id)
+    setSelectedIds([el.id])
   }
 
   function updateElement(element: LabelElement) {
     setDefinition((prev) => ({
       ...prev,
-      elements: prev.elements.map((el) => (el.id === element.id ? normalizeElement(element) : el)),
+      elements: prev.elements.map((el) => {
+        if (el.id !== element.id) {
+          return el
+        }
+        if (el.type === "table" && element.width !== el.width) {
+          return normalizeElement({
+            ...element,
+            colWidths: scaleTableColWidthsToWidth(el.cols ?? 3, el.width, el.colWidths, element.width),
+          })
+        }
+        return normalizeElement(element)
+      }),
     }))
   }
 
@@ -189,15 +233,53 @@ export default function LabelTemplateEditorPage() {
     }))
   }
 
+  function scaleAllElements(factor: number) {
+    setDefinition((prev) => ({
+      ...prev,
+      elements: scaleAllLabelElements(prev.elements, factor, widthMm, heightMm),
+    }))
+  }
+
+  function applyDragFromOrigins(
+    origins: Record<string, { x: number; y: number }>,
+    dx: number,
+    dy: number,
+  ) {
+    setDefinition((prev) => ({
+      ...prev,
+      elements: applyLabelElementDragFromOrigins(prev.elements, origins, dx, dy, widthMm, heightMm),
+    }))
+  }
+
   function deleteSelected() {
-    if (!selectedId) {
+    if (selectedIds.length === 0) {
+      return
+    }
+    const idSet = new Set(selectedIds)
+    setDefinition((prev) => ({
+      ...prev,
+      elements: prev.elements.filter((el) => !idSet.has(el.id)),
+    }))
+    setSelectedIds([])
+  }
+
+  function groupSelected() {
+    if (selectedIds.length < 2) {
+      return
+    }
+    const nextElements = groupLabelElements(definition.elements, selectedIds)
+    setDefinition((prev) => ({ ...prev, elements: nextElements }))
+    setSelectedIds(expandSelectionWithGroups(nextElements, selectedIds))
+  }
+
+  function ungroupSelected() {
+    if (selectedIds.length === 0) {
       return
     }
     setDefinition((prev) => ({
       ...prev,
-      elements: prev.elements.filter((el) => el.id !== selectedId),
+      elements: ungroupLabelElements(prev.elements, selectedIds),
     }))
-    setSelectedId(null)
   }
 
   async function uploadImageFile(file: File): Promise<string | null> {
@@ -233,7 +315,7 @@ export default function LabelTemplateEditorPage() {
             el.id === existingId ? { ...el, src, width: size.width, height: size.height } : el,
           ),
         }))
-        setSelectedId(existingId)
+        setSelectedIds([existingId])
         return
       }
 
@@ -252,7 +334,7 @@ export default function LabelTemplateEditorPage() {
         ...prev,
         elements: [...prev.elements, el],
       }))
-      setSelectedId(el.id)
+      setSelectedIds([el.id])
       toast.success("Rasm qo'shildi")
     } catch {
       toast.error("Rasmni qayta ishlashda xatolik")
@@ -264,7 +346,7 @@ export default function LabelTemplateEditorPage() {
   }
 
   async function handleSelectedImageFile(file: File) {
-    const el = definition.elements.find((item) => item.id === selectedId)
+    const el = definition.elements.find((item) => item.id === selectedIds[0])
     if (el?.type === "image") {
       await insertImageAt(file, el.x, el.y, el.id)
     }
@@ -319,9 +401,6 @@ export default function LabelTemplateEditorPage() {
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
-      if (e.key !== "Delete" || !selectedId) {
-        return
-      }
       const target = e.target
       if (target instanceof HTMLElement) {
         const tag = target.tagName
@@ -329,12 +408,25 @@ export default function LabelTemplateEditorPage() {
           return
         }
       }
-      e.preventDefault()
-      deleteSelected()
+
+      if (e.key === "Delete" && selectedIds.length > 0) {
+        e.preventDefault()
+        deleteSelected()
+        return
+      }
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "g") {
+        e.preventDefault()
+        if (e.shiftKey) {
+          ungroupSelected()
+        } else {
+          groupSelected()
+        }
+      }
     }
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
-  }, [selectedId])
+  }, [selectedIds, definition.elements])
 
   if (loading) {
     return (
@@ -374,68 +466,116 @@ export default function LabelTemplateEditorPage() {
       }
     >
       <Panel title="Sozlamalar" className="mb-4">
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
-          <div className="space-y-1">
-            <Label className="text-xs">Nomi</Label>
-            <Input value={name} onChange={(e) => setName(e.target.value)} />
+        <div className="space-y-2">
+          <div className="grid grid-cols-2 gap-x-3 gap-y-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-7">
+            <div className="space-y-0.5 sm:col-span-2">
+              <Label className="text-[11px] text-muted-foreground">Nomi</Label>
+              <Input className="h-8" value={name} onChange={(e) => setName(e.target.value)} />
+            </div>
+            <div className="space-y-0.5">
+              <Label className="text-[11px] text-muted-foreground">Liniya</Label>
+              <select
+                className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-sm"
+                value={lineId}
+                onChange={(e) => setLineId(Number(e.target.value))}
+              >
+                {lines.map((line) => (
+                  <option key={line.line_id} value={line.line_id}>
+                    {line.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-0.5">
+              <Label className="text-[11px] text-muted-foreground">Kenglik (mm)</Label>
+              <Input className="h-8" type="number" value={widthMm} onChange={(e) => setWidthMm(Number(e.target.value))} />
+            </div>
+            <div className="space-y-0.5">
+              <Label className="text-[11px] text-muted-foreground">Balandlik (mm)</Label>
+              <Input className="h-8" type="number" value={heightMm} onChange={(e) => setHeightMm(Number(e.target.value))} />
+            </div>
+            <div className="space-y-0.5">
+              <Label className="text-[11px] text-muted-foreground">DPI</Label>
+              <select
+                className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-sm"
+                value={dpi}
+                onChange={(e) => setDpi(Number(e.target.value))}
+              >
+                <option value={203}>203</option>
+                <option value={300}>300</option>
+              </select>
+            </div>
+            <div className="space-y-0.5">
+              <Label className="text-[11px] text-muted-foreground">Aylanish</Label>
+              <select
+                className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-sm"
+                value={printRotationDeg}
+                onChange={(e) => setPrintRotationDeg(Number(e.target.value) === 90 ? 90 : 0)}
+              >
+                <option value={0}>0°</option>
+                <option value={90}>90°</option>
+              </select>
+            </div>
           </div>
-          <div className="space-y-1">
-            <Label className="text-xs">Liniya</Label>
-            <select
-              className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-              value={lineId}
-              onChange={(e) => setLineId(Number(e.target.value))}
-            >
-              {lines.map((line) => (
-                <option key={line.line_id} value={line.line_id}>
-                  {line.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs">Kenglik (mm)</Label>
-            <Input type="number" value={widthMm} onChange={(e) => setWidthMm(Number(e.target.value))} />
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs">Balandlik (mm)</Label>
-            <Input type="number" value={heightMm} onChange={(e) => setHeightMm(Number(e.target.value))} />
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs">DPI</Label>
-            <select
-              className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-              value={dpi}
-              onChange={(e) => setDpi(Number(e.target.value))}
-            >
-              <option value={203}>203</option>
-              <option value={300}>300</option>
-            </select>
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs">Chop etish aylanishi</Label>
-            <select
-              className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-              value={printRotationDeg}
-              onChange={(e) => setPrintRotationDeg(Number(e.target.value) === 90 ? 90 : 0)}
-            >
-              <option value={0}>Aylanishsiz</option>
-              <option value={90}>90° (albom / gorizontal)</option>
-            </select>
-            <p className="text-[10px] text-muted-foreground">
-              Albom qog&apos;ozda chop etish uchun 90° tanlang
-            </p>
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs">Ko&apos;rish: serial</Label>
-            <Input value={previewSerial} onChange={(e) => setPreviewSerial(e.target.value)} />
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs">Ko&apos;rish: acc serial</Label>
-            <Input value={previewAccSerial} onChange={(e) => setPreviewAccSerial(e.target.value)} />
-            <p className="text-[10px] text-muted-foreground">
-              Skanerlangan aksessuar nomeri (maydon <code className="text-[10px]">acc_serial</code>)
-            </p>
+          <div className="grid grid-cols-2 gap-x-3 gap-y-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
+            <div className="space-y-0.5">
+              <Label className="text-[11px] text-muted-foreground">Density</Label>
+              <Input
+                className="h-8"
+                type="number"
+                min={0}
+                max={30}
+                value={density}
+                disabled={usePrinterDefaults || sizeOnly}
+                onChange={(e) => {
+                  const n = Number(e.target.value)
+                  setDensity(Number.isFinite(n) ? Math.max(0, Math.min(30, n)) : 0)
+                }}
+              />
+            </div>
+            <div className="space-y-0.5">
+              <Label className="text-[11px] text-muted-foreground">Speed</Label>
+              <Input
+                className="h-8"
+                type="number"
+                min={1}
+                max={14}
+                value={speed}
+                disabled={usePrinterDefaults || sizeOnly}
+                onChange={(e) => setSpeed(Number(e.target.value))}
+              />
+            </div>
+            <div className="space-y-0.5">
+              <Label className="text-[11px] text-muted-foreground">Gap (mm)</Label>
+              <Input
+                className="h-8"
+                type="number"
+                min={0}
+                step={0.5}
+                value={gapMm}
+                disabled={usePrinterDefaults || sizeOnly}
+                onChange={(e) => setGapMm(Number(e.target.value))}
+              />
+            </div>
+            <div className="col-span-2 flex flex-wrap items-end gap-x-4 gap-y-1 pb-1 sm:col-span-3 md:col-span-1 lg:col-span-3">
+              <label className="flex h-8 items-center gap-1.5 text-xs whitespace-nowrap">
+                <input
+                  type="checkbox"
+                  checked={usePrinterDefaults}
+                  onChange={(e) => setUsePrinterDefaults(e.target.checked)}
+                />
+                Printer defaults
+              </label>
+              <label className="flex h-8 items-center gap-1.5 text-xs whitespace-nowrap">
+                <input
+                  type="checkbox"
+                  checked={sizeOnly || usePrinterDefaults}
+                  disabled={usePrinterDefaults}
+                  onChange={(e) => setSizeOnly(e.target.checked)}
+                />
+                Faqat o&apos;lcham
+              </label>
+            </div>
           </div>
         </div>
       </Panel>
@@ -516,10 +656,12 @@ export default function LabelTemplateEditorPage() {
         <Panel title="Maket" noPadding className="overflow-hidden">
           <LabelCanvas
             template={templatePreview}
-            selectedId={selectedId}
-            onSelect={setSelectedId}
+            selectedIds={selectedIds}
+            onSelectIds={setSelectedIds}
+            onApplyDragFromOrigins={applyDragFromOrigins}
             onUpdateElement={updateElement}
             onOffsetAllElements={offsetAllElements}
+            onScaleAllElements={scaleAllElements}
             onImageDrop={(file, x, y) => void handleCanvasImageDrop(file, x, y)}
             onElementDrop={addElementAt}
             sampleData={previewSampleData}
@@ -530,8 +672,15 @@ export default function LabelTemplateEditorPage() {
           <Panel title="Xususiyatlar" className="h-fit">
             <ElementProperties
               element={selectedElement}
+              selectedCount={selectedIds.length}
+              canGroup={canGroup}
+              canUngroup={canUngroup}
+              onGroup={groupSelected}
+              onUngroup={ungroupSelected}
               onChange={updateElement}
               onDelete={deleteSelected}
+              labelWidthMm={widthMm}
+              labelHeightMm={heightMm}
               onImageFile={selectedElement?.type === "image" ? (file) => void handleSelectedImageFile(file) : undefined}
             />
           </Panel>

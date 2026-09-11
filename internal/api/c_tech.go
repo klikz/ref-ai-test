@@ -245,7 +245,7 @@ func looksLikeModelFieldKeysRow(row []string) bool {
 	for _, cell := range row {
 		key := strings.TrimSpace(strings.ToLower(cell))
 		switch key {
-		case "id", "seriya_raqami", "acc_serial", "compressor_serial", "kompressor_serial", "qisqa_nomi", "modeli", "sovutgich_turi", "door_code":
+		case "id", "seriya_raqami", "acc_serial", "compressor_serial", "kompressor_serial", "qisqa_nomi", "modeli", "sovutgich_turi", "door_code", "freeze_door_code", "ref_door_code":
 			return true
 		}
 	}
@@ -315,8 +315,23 @@ func normalizeModelHeaderKey(header string) string {
 		return "muzlatish_quvvati"
 	case "nominal tok quvvati (w)":
 		return "nominal_tok_quvvati_w"
+	case "nominal tok kuchi (a)":
+		return "nominal_tok_kuchi_a"
 	case "shovqin darajasi ichki blok db":
 		return "shovqin_darajasi_db"
+	case "eshik rangi":
+		return "eshik_rangi"
+	case "rangi(eng)", "rangi (eng)", "rangi eng":
+		return "rangi_eng"
+	case "ko'rpus rangi(shortname)", "korpus rangi(shortname)", "ko'rpus rangi (shortname)", "korpus rangi (shortname)",
+		"korpus rangi shortname", "ko'rpus rangi shortname":
+		return "korpus_rangi_shortname"
+	case "eshik rangi(shortname)", "eshik rangi (shortname)", "eshik rangi shortname":
+		return "eshik_rangi_shortname"
+	case "rangi(kodi)", "rangi (kodi)", "rangi kodi", "rangi(kodi) faqat son", "rangi (kodi) faqat son":
+		return "rangi_kodi"
+	case "manzil (ru)", "manzil(ru)", "manzil ru":
+		return "manzil_ru"
 	}
 	if strings.Contains(key, "_") {
 		return key
@@ -341,39 +356,48 @@ func modelFromListExportRow(row []string) models.ModelInfo {
 	model.Sovutgich_turi = modelCell(row, 4)
 	model.Qisqa_nomi = modelCell(row, 5)
 	model.Rangi = modelCell(row, 6)
-	model.Sotuv_turi = modelCell(row, 7)
-	model.GS1_EAN13 = modelCell(row, 8)
-	model.GOST = modelCell(row, 9)
-	model.Taminot_kuchlanishi_v = modelCell(row, 10)
-	model.Xladagent_miqdori_g = modelCell(row, 11)
-	model.Energiya_samaradorlik_sarfi = modelCell(row, 12)
-	model.Kompressor_nomi = modelCell(row, 13)
-	model.Maxalliy_sertifikat = modelCell(row, 14)
-	model.EAC_Sertifikati = modelCell(row, 15)
-	model.CE_Sertifikat = modelCell(row, 16)
-	model.Ishlab_chiqaruvchi_mamlakat = modelCell(row, 17)
-	model.Korxon_nomi = modelCell(row, 18)
-	model.Manzil = modelCell(row, 19)
-	model.Brend = modelCell(row, 20)
-	model.Local_export = modelCell(row, 21)
-	model.Netto = modelCell(row, 22)
-	model.Brutto = modelCell(row, 23)
-	model.Qadoq_hajmi = modelCell(row, 24)
-	model.Mahsulot_hajmi = modelCell(row, 25)
-	model.Iqlim_sharoitlari = modelCell(row, 26)
-	model.Elektr_toki_kuchlanishi_va_turi = modelCell(row, 27)
-	model.Yoritgich_lampaning_quvvati_vt = modelCell(row, 28)
-	model.Umumiy_hajmi_l = modelCell(row, 29)
-	model.Sovutgich_kamera_hajmi_l = modelCell(row, 30)
-	model.Muzlatgich_kamera_hajmi_l = modelCell(row, 31)
-	model.Muzlatish_quvvati = modelCell(row, 32)
-	model.Nominal_tok_quvvati_w = modelCell(row, 33)
-	model.Freon = modelCell(row, 34)
-	model.Shovqin_darajasi_db = modelCell(row, 35)
-	model.OdooCode = modelCell(row, 36)
-	model.Door_code = modelCell(row, 37)
-	model.Compressor_serial = modelCell(row, 38)
-	model.Comment = modelCell(row, 39)
+	model.EshikRangi = modelCell(row, 7)
+	model.RangiEng = modelCell(row, 8)
+	model.KorpusRangiShortname = modelCell(row, 9)
+	model.EshikRangiShortname = modelCell(row, 10)
+	model.RangiKodi = modelCell(row, 11)
+	model.Sotuv_turi = modelCell(row, 12)
+	model.GS1_EAN13 = modelCell(row, 13)
+	model.GOST = modelCell(row, 14)
+	model.Taminot_kuchlanishi_v = modelCell(row, 15)
+	model.Xladagent_miqdori_g = modelCell(row, 16)
+	model.Energiya_samaradorlik_sarfi = modelCell(row, 17)
+	model.Kompressor_nomi = modelCell(row, 18)
+	model.Maxalliy_sertifikat = modelCell(row, 19)
+	model.EAC_Sertifikati = modelCell(row, 20)
+	model.CE_Sertifikat = modelCell(row, 21)
+	model.Ishlab_chiqaruvchi_mamlakat = modelCell(row, 22)
+	model.Korxon_nomi = modelCell(row, 23)
+	model.Manzil = modelCell(row, 24)
+	model.ManzilRu = modelCell(row, 25)
+	model.Brend = modelCell(row, 26)
+	model.Local_export = modelCell(row, 27)
+	model.Netto = modelCell(row, 28)
+	model.Brutto = modelCell(row, 29)
+	model.Qadoq_hajmi = modelCell(row, 30)
+	model.Mahsulot_hajmi = modelCell(row, 31)
+	model.Iqlim_sharoitlari = modelCell(row, 32)
+	model.Elektr_toki_kuchlanishi_va_turi = modelCell(row, 33)
+	model.Yoritgich_lampaning_quvvati_vt = modelCell(row, 34)
+	model.Umumiy_hajmi_l = modelCell(row, 35)
+	model.Sovutgich_kamera_hajmi_l = modelCell(row, 36)
+	model.Muzlatgich_kamera_hajmi_l = modelCell(row, 37)
+	model.Muzlatish_quvvati = modelCell(row, 38)
+	model.Nominal_tok_quvvati_w = modelCell(row, 39)
+	model.Nominal_tok_kuchi_a = modelCell(row, 40)
+	model.Freon = modelCell(row, 41)
+	model.Shovqin_darajasi_db = modelCell(row, 42)
+	model.OdooCode = modelCell(row, 43)
+	model.Freeze_door_code = modelCell(row, 44)
+	model.Ref_door_code = modelCell(row, 45)
+	model.Door_code = model.Freeze_door_code
+	model.Compressor_serial = modelCell(row, 46)
+	model.Comment = modelCell(row, 47)
 	return model
 }
 func (s *ServerModel) ModelsGetAll(c *gin.Context) {
@@ -519,6 +543,12 @@ func (s *ServerModel) ModelsUpdate(c *gin.Context) {
 		model.Door_code = modelCell(row, 36)
 		model.Compressor_serial = modelCell(row, 37)
 		model.Comment = modelCell(row, 38)
+		model.EshikRangi = modelCell(row, 39)
+		model.RangiEng = modelCell(row, 40)
+		model.KorpusRangiShortname = modelCell(row, 41)
+		model.EshikRangiShortname = modelCell(row, 42)
+		model.RangiKodi = modelCell(row, 43)
+		model.ManzilRu = modelCell(row, 44)
 
 		allData = append(allData, model)
 	}

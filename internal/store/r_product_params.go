@@ -13,7 +13,9 @@ type ProductParams struct {
 	SerialNumber     string
 	CompressorSerial string
 	AccSerial        string
-	DoorSerial       string
+	DoorSerial       string // legacy / display: freeze
+	FreezeDoorSerial string
+	RefDoorSerial    string
 	GsCode           string
 	ModelID          int
 	Modeli           string
@@ -40,6 +42,10 @@ func productParamsDuplicateError(err error) error {
 		return errors.New("bu aksessuar nomer allaqachon kiritilgan")
 	case strings.Contains(detail, "(door_serial)"):
 		return errors.New("bu door nomer allaqachon kiritilgan")
+	case strings.Contains(detail, "(freeze_door_serial)"):
+		return errors.New("bu freeze door nomer allaqachon kiritilgan")
+	case strings.Contains(detail, "(ref_door_serial)"):
+		return errors.New("bu ref door nomer allaqachon kiritilgan")
 	default:
 		return errors.New("bunday ma'lumot allaqachon kiritilgan")
 	}
@@ -120,11 +126,12 @@ func (r *Repo) ProductParamsDeleteBySerial(serial string) error {
 }
 
 // ProductParamsUpsertQadoqlash updates compressor/acc/door/model by serial if row exists; otherwise inserts.
-func (r *Repo) ProductParamsUpsertQadoqlash(serial, compressor, accSerial, doorSerial string, modelID, userID int) error {
+func (r *Repo) ProductParamsUpsertQadoqlash(serial, compressor, accSerial, freezeDoorSerial, refDoorSerial string, modelID, userID int) error {
 	serial = strings.TrimSpace(serial)
 	compressor = strings.TrimSpace(compressor)
 	accSerial = strings.TrimSpace(accSerial)
-	doorSerial = strings.TrimSpace(doorSerial)
+	freezeDoorSerial = strings.TrimSpace(freezeDoorSerial)
+	refDoorSerial = strings.TrimSpace(refDoorSerial)
 	if serial == "" {
 		return errors.New("serial bo'sh")
 	}
@@ -142,11 +149,13 @@ func (r *Repo) ProductParamsUpsertQadoqlash(serial, compressor, accSerial, doorS
 			SET compressor_serial = NULLIF($2, ''),
 				acc_serial = NULLIF($3, ''),
 				door_serial = NULLIF($4, ''),
-				model_id = NULLIF($5, 0),
-				u_user_id = $6,
+				freeze_door_serial = NULLIF($4, ''),
+				ref_door_serial = NULLIF($5, ''),
+				model_id = NULLIF($6, 0),
+				u_user_id = $7,
 				u_time = now()
 			WHERE serial_number = $1`,
-			serial, compressor, accSerial, doorSerial, modelID, userID,
+			serial, compressor, accSerial, freezeDoorSerial, refDoorSerial, modelID, userID,
 		)
 		if err != nil {
 			return productParamsDuplicateError(err)
@@ -156,9 +165,11 @@ func (r *Repo) ProductParamsUpsertQadoqlash(serial, compressor, accSerial, doorS
 
 	_, err = r.store.db.Exec(`
 		INSERT INTO lines.product_params (
-			serial_number, compressor_serial, acc_serial, door_serial, model_id, c_user_id
-		) VALUES ($1, NULLIF($2, ''), NULLIF($3, ''), NULLIF($4, ''), NULLIF($5, 0), $6)`,
-		serial, compressor, accSerial, doorSerial, modelID, userID,
+			serial_number, compressor_serial, acc_serial, door_serial,
+			freeze_door_serial, ref_door_serial, model_id, c_user_id
+		) VALUES ($1, NULLIF($2, ''), NULLIF($3, ''), NULLIF($4, ''),
+			NULLIF($4, ''), NULLIF($5, ''), NULLIF($6, 0), $7)`,
+		serial, compressor, accSerial, freezeDoorSerial, refDoorSerial, modelID, userID,
 	)
 	if err != nil {
 		return productParamsDuplicateError(err)
@@ -176,12 +187,20 @@ func scanProductParams(row interface {
 		&out.CompressorSerial,
 		&out.AccSerial,
 		&out.DoorSerial,
+		&out.FreezeDoorSerial,
+		&out.RefDoorSerial,
 		&out.GsCode,
 		&out.ModelID,
 		&out.Modeli,
 		&out.CreatedAt,
 		&out.UserName,
 	)
+	if strings.TrimSpace(out.FreezeDoorSerial) == "" {
+		out.FreezeDoorSerial = out.DoorSerial
+	}
+	if strings.TrimSpace(out.DoorSerial) == "" {
+		out.DoorSerial = out.FreezeDoorSerial
+	}
 	return out, err
 }
 
@@ -191,6 +210,8 @@ const productParamsSelect = `
 		COALESCE(pp.compressor_serial, ''),
 		COALESCE(pp.acc_serial, ''),
 		COALESCE(pp.door_serial, ''),
+		COALESCE(NULLIF(pp.freeze_door_serial, ''), pp.door_serial, ''),
+		COALESCE(pp.ref_door_serial, ''),
 		COALESCE(pp.gscode, ''),
 		COALESCE(pp.model_id, 0),
 		COALESCE(m.modeli, ''),
@@ -238,6 +259,8 @@ func (r *Repo) ProductParamsGetByDoorSerial(doorSerial string) (ProductParams, e
 	}
 	out, err := scanProductParams(r.store.db.QueryRow(productParamsSelect+`
 		WHERE pp.door_serial = $1
+		   OR pp.freeze_door_serial = $1
+		   OR pp.ref_door_serial = $1
 		LIMIT 1`, doorSerial))
 	if errors.Is(err, sql.ErrNoRows) {
 		return ProductParams{}, nil

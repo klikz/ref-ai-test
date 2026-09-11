@@ -46,7 +46,7 @@ export default function LoginPage() {
             <div className="mb-4 flex size-14 items-center justify-center rounded-2xl bg-primary/15 text-primary shadow-lg shadow-primary/20">
               <Snowflake className="size-7" />
             </div>
-            <h1 className="text-2xl font-bold tracking-tight">Premier AC</h1>
+            <h1 className="text-2xl font-bold tracking-tight">Premier REF</h1>
             <p className="mt-1 text-sm text-muted-foreground">
               Ishlab chiqarish boshqaruv tizimi
             </p>

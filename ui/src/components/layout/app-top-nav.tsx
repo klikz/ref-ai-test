@@ -41,7 +41,7 @@ export function AppTopNav() {
             <div className="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent" />
           </div>
           <div className="hidden sm:block">
-            <p className="text-sm font-bold leading-none tracking-tight">Premier AC</p>
+            <p className="text-sm font-bold leading-none tracking-tight">Premier REF</p>
             <p className="mt-1 text-xs text-muted-foreground">Ishlab chiqarish</p>
           </div>
         </Link>

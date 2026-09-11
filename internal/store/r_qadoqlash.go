@@ -7,25 +7,29 @@ import (
 )
 
 type QadoqlashSession struct {
-	ID         int    `json:"id"`
-	Serial     string `json:"serial"`
-	AccSerial  string `json:"acc_serial"`
-	DoorSerial string `json:"door_serial"`
-	Modeli     string `json:"modeli"`
-	Time       string `json:"time"`
+	ID               int    `json:"id"`
+	Serial           string `json:"serial"`
+	AccSerial        string `json:"acc_serial"`
+	DoorSerial       string `json:"door_serial"`
+	FreezeDoorSerial string `json:"freeze_door_serial"`
+	RefDoorSerial    string `json:"ref_door_serial"`
+	Modeli           string `json:"modeli"`
+	Time             string `json:"time"`
 }
 
 type QadoqlashLastScan struct {
-	Serial     string `json:"serial"`
-	AccSerial  string `json:"acc_serial"`
-	DoorSerial string `json:"door_serial"`
-	Modeli     string `json:"modeli"`
-	Compressor string `json:"compressor"`
-	BxModel    string `json:"bx_model"`
-	BxResult   string `json:"bx_result"`
-	Time       string `json:"time"`
-	FilePath   string `json:"file_path,omitempty"`
-	ProductID  int    `json:"product_id"`
+	Serial           string `json:"serial"`
+	AccSerial        string `json:"acc_serial"`
+	DoorSerial       string `json:"door_serial"`
+	FreezeDoorSerial string `json:"freeze_door_serial"`
+	RefDoorSerial    string `json:"ref_door_serial"`
+	Modeli           string `json:"modeli"`
+	Compressor       string `json:"compressor"`
+	BxModel          string `json:"bx_model"`
+	BxResult         string `json:"bx_result"`
+	Time             string `json:"time"`
+	FilePath         string `json:"file_path,omitempty"`
+	ProductID        int    `json:"product_id"`
 }
 
 type QadoqlashSessionsLastResponse struct {
@@ -46,7 +50,8 @@ func (r *Repo) QadoqlashSessionsGetLast(limit int) (QadoqlashSessionsLastRespons
 		SELECT p.id,
 			p.serial,
 			COALESCE(NULLIF(pp.acc_serial, ''), NULLIF(p.acc_serial, ''), ''),
-			COALESCE(pp.door_serial, ''),
+			COALESCE(NULLIF(pp.freeze_door_serial, ''), NULLIF(p.freeze_door_serial, ''), pp.door_serial, ''),
+			COALESCE(NULLIF(pp.ref_door_serial, ''), NULLIF(p.ref_door_serial, ''), ''),
 			COALESCE(m.modeli, ''),
 			COALESCE(to_char(p.time, 'YYYY-MM-DD HH24:MI:SS'), '')
 		FROM lines.products p
@@ -65,9 +70,14 @@ func (r *Repo) QadoqlashSessionsGetLast(limit int) (QadoqlashSessionsLastRespons
 
 	for rows.Next() {
 		row := QadoqlashSession{}
-		if err := rows.Scan(&row.ID, &row.Serial, &row.AccSerial, &row.DoorSerial, &row.Modeli, &row.Time); err != nil {
+		if err := rows.Scan(
+			&row.ID, &row.Serial, &row.AccSerial,
+			&row.FreezeDoorSerial, &row.RefDoorSerial,
+			&row.Modeli, &row.Time,
+		); err != nil {
 			return out, err
 		}
+		row.DoorSerial = row.FreezeDoorSerial
 		out.Sessions = append(out.Sessions, row)
 	}
 	if err := rows.Err(); err != nil {
@@ -80,12 +90,14 @@ func (r *Repo) QadoqlashSessionsGetLast(limit int) (QadoqlashSessionsLastRespons
 
 	latest := out.Sessions[0]
 	last := &QadoqlashLastScan{
-		Serial:     latest.Serial,
-		AccSerial:  latest.AccSerial,
-		DoorSerial: latest.DoorSerial,
-		Modeli:     latest.Modeli,
-		Time:       latest.Time,
-		ProductID:  latest.ID,
+		Serial:           latest.Serial,
+		AccSerial:        latest.AccSerial,
+		DoorSerial:       latest.FreezeDoorSerial,
+		FreezeDoorSerial: latest.FreezeDoorSerial,
+		RefDoorSerial:    latest.RefDoorSerial,
+		Modeli:           latest.Modeli,
+		Time:             latest.Time,
+		ProductID:        latest.ID,
 	}
 
 	lab, err := r.LabBxDataLatestBySerial(latest.Serial)

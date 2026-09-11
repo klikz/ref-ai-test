@@ -374,7 +374,7 @@ func (r *Repo) LinesListForLookup() ([]models.LineLookup, error) {
 		SELECT line_id, COALESCE(name, '')
 		FROM lines.lines_list
 		WHERE status = true
-		ORDER BY name`)
+		ORDER BY sort_order, name`)
 	if err != nil {
 		return nil, err
 	}

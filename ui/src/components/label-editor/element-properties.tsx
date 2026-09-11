@@ -24,6 +24,7 @@ import type { LabelDataSource, LabelElement, LabelFontFamily, LabelTableCell } f
 import {
   TABLE_COLS_MAX,
   TABLE_ROWS_MAX,
+  LABEL_ELEMENT_ROTATION_DEGS,
   LABEL_FONT_FAMILIES,
   clampTableCols,
   clampTableRows,
@@ -36,8 +37,10 @@ import {
   insertTableColWidths,
   insertTableRow,
   normalizeElement,
+  normalizeElementRotationDeg,
   normalizeTableCell,
   normalizeTableColWidths,
+  placeBoxKeepingCenter,
   removeTableCol,
   removeTableColWidths,
   removeTableRow,
@@ -50,9 +53,16 @@ import { labelAssetUrl } from "@/lib/label-image"
 
 type ElementPropertiesProps = {
   element: LabelElement | null
+  selectedCount?: number
+  canGroup?: boolean
+  canUngroup?: boolean
+  onGroup?: () => void
+  onUngroup?: () => void
   onChange: (element: LabelElement) => void
   onDelete: () => void
   onImageFile?: (file: File) => void
+  labelWidthMm?: number
+  labelHeightMm?: number
 }
 
 function NumberField({
@@ -195,7 +205,42 @@ function FontFamilyField({
   )
 }
 
-export function ElementProperties({ element, onChange, onDelete, onImageFile }: ElementPropertiesProps) {
+export function ElementProperties({
+  element,
+  selectedCount = 0,
+  canGroup = false,
+  canUngroup = false,
+  onGroup,
+  onUngroup,
+  onChange,
+  onDelete,
+  onImageFile,
+  labelWidthMm = 1000,
+  labelHeightMm = 1000,
+}: ElementPropertiesProps) {
+  if (selectedCount > 1) {
+    return (
+      <div className="space-y-3">
+        <p className="text-sm font-medium">{selectedCount} ta element tanlangan</p>
+        <p className="text-xs text-muted-foreground">
+          Guruhlash — birga surish uchun. Ctrl+G / Ctrl+Shift+G.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" variant="outline" size="sm" disabled={!canGroup} onClick={onGroup}>
+            Guruhlash
+          </Button>
+          <Button type="button" variant="outline" size="sm" disabled={!canUngroup} onClick={onUngroup}>
+            Ajratish
+          </Button>
+          <Button type="button" variant="destructive" size="sm" className="gap-1" onClick={onDelete}>
+            <Trash2 className="size-3.5" />
+            O&apos;chirish
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
   if (!element) {
     return (
       <div className="text-sm text-muted-foreground">
@@ -205,22 +250,36 @@ export function ElementProperties({ element, onChange, onDelete, onImageFile }: 
   }
 
   function patch(partial: Partial<LabelElement>) {
+    const sizeChanging =
+      (partial.width !== undefined && partial.width !== element.width) ||
+      (partial.height !== undefined && partial.height !== element.height)
+    const rotationDeg = normalizeElementRotationDeg(element.rotationDeg)
+
+    let next: LabelElement = { ...element, ...partial }
     if (element.type === "table" && partial.width !== undefined && partial.width !== element.width) {
-      onChange(
-        normalizeElement({
-          ...element,
-          ...partial,
-          colWidths: scaleTableColWidthsToWidth(
-            element.cols ?? 3,
-            element.width,
-            element.colWidths,
-            partial.width,
-          ),
-        }),
-      )
-      return
+      next = {
+        ...next,
+        colWidths: scaleTableColWidthsToWidth(
+          element.cols ?? 3,
+          element.width,
+          element.colWidths,
+          partial.width,
+        ),
+      }
     }
-    onChange(normalizeElement({ ...element, ...partial }))
+
+    if (sizeChanging && rotationDeg !== 0) {
+      const placed = placeBoxKeepingCenter(
+        element,
+        next.width,
+        next.height,
+        labelWidthMm,
+        labelHeightMm,
+      )
+      next = { ...next, ...placed }
+    }
+
+    onChange(normalizeElement(next))
   }
 
   function setDataSource(dataSource: LabelDataSource) {
@@ -260,6 +319,11 @@ export function ElementProperties({ element, onChange, onDelete, onImageFile }: 
           )}
         </div>
         <div className="flex shrink-0 items-center gap-1">
+          {canUngroup ? (
+            <Button type="button" variant="outline" size="sm" className="h-8" onClick={onUngroup}>
+              Ajratish
+            </Button>
+          ) : null}
           <PropertiesGroupToggle grouped={grouped} onChange={toggleGrouped} />
           <Button variant="outline" size="icon" className="size-8" onClick={onDelete}>
             <Trash2 className="size-4 text-destructive" />
@@ -273,6 +337,20 @@ export function ElementProperties({ element, onChange, onDelete, onImageFile }: 
           <NumberField label="Y (mm)" value={element.y} onChange={(y) => patch({ y })} />
           <NumberField label="W (mm)" value={element.width} onChange={(width) => patch({ width })} />
           <NumberField label="H (mm)" value={element.height} onChange={(height) => patch({ height })} />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs text-muted-foreground">Aylanish</Label>
+          <select
+            className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-sm"
+            value={element.rotationDeg ?? 0}
+            onChange={(e) => patch({ rotationDeg: normalizeElementRotationDeg(Number(e.target.value)) })}
+          >
+            {LABEL_ELEMENT_ROTATION_DEGS.map((deg) => (
+              <option key={deg} value={deg}>
+                {deg}°
+              </option>
+            ))}
+          </select>
         </div>
       </PropertiesSection>
 
@@ -469,6 +547,33 @@ export function ElementProperties({ element, onChange, onDelete, onImageFile }: 
 
       {(element.type === "line" || element.type === "rect") && (
         <PropertiesSection title="Ko'rinish" grouped={grouped} defaultOpen>
+          {element.type === "line" ? (
+            <div className="space-y-1">
+              <Label className="text-xs">Yo&apos;nalish</Label>
+              <select
+                className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-sm"
+                value={element.orientation === "vertical" ? "vertical" : "horizontal"}
+                onChange={(e) => {
+                  const orientation = e.target.value === "vertical" ? "vertical" : "horizontal"
+                  const swapAxes =
+                    (orientation === "vertical" && element.orientation !== "vertical") ||
+                    (orientation === "horizontal" && element.orientation === "vertical")
+                  if (swapAxes) {
+                    patch({
+                      orientation,
+                      width: element.height,
+                      height: element.width,
+                    })
+                  } else {
+                    patch({ orientation })
+                  }
+                }}
+              >
+                <option value="horizontal">Gorizontal</option>
+                <option value="vertical">Vertikal</option>
+              </select>
+            </div>
+          ) : null}
           <NumberField
             label="Chiziq qalinligi (mm)"
             value={element.strokeWidth ?? 0.3}

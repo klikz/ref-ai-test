@@ -54,10 +54,33 @@ export function isLabelElementType(value: string): value is LabelElementType {
   return LABEL_ELEMENT_TYPES.includes(value as LabelElementType)
 }
 
+/** Palette drag payload: oddiy tip yoki `vline` (vertikal chiziq). */
+export function isLabelPaletteDropType(value: string): boolean {
+  return isLabelElementType(value) || value === "vline"
+}
+
+export type LabelLineOrientation = "horizontal" | "vertical"
+
+export function normalizeLineOrientation(value: unknown): LabelLineOrientation {
+  return value === "vertical" ? "vertical" : "horizontal"
+}
+
 export type BarcodeFormat = "ean13" | "code128"
 
 /** static — matn o'zgarmaydi; backend — chop etishda serverdan keladi */
 export type LabelDataSource = "static" | "backend"
+
+export type LabelElementRotationDeg = 0 | 90 | 180 | 270
+
+export const LABEL_ELEMENT_ROTATION_DEGS: LabelElementRotationDeg[] = [0, 90, 180, 270]
+
+export function normalizeElementRotationDeg(value: unknown): LabelElementRotationDeg {
+  const n = typeof value === "number" ? value : Number(value)
+  if (n === 90 || n === 180 || n === 270) {
+    return n
+  }
+  return 0
+}
 
 export type LabelElement = {
   id: string
@@ -79,12 +102,18 @@ export type LabelElement = {
   src?: string
   strokeWidth?: number
   fillColor?: string
+  /** Faqat line: gorizontal (default) yoki vertikal. */
+  orientation?: "horizontal" | "vertical"
   rows?: number
   cols?: number
   cells?: LabelTableCell[]
   /** Har bir ustun kengligi (mm). Yig'indisi width ga teng. */
   colWidths?: number[]
   zIndex?: number
+  /** Element aylanishi (markaz atrofida). Print layoutga ta'sir qiladi. */
+  rotationDeg?: LabelElementRotationDeg
+  /** Bir xil groupId — guruhlangan elementlar; print layoutga ta'sir qilmaydi. */
+  groupId?: string
 }
 
 export type LabelDefinition = {
@@ -101,7 +130,289 @@ export type LabelTemplate = {
   height_mm: number
   dpi: number
   print_rotation_deg?: LabelPrintRotationDeg
+  density?: number
+  speed?: number
+  gap_mm?: number
+  use_printer_defaults?: boolean
+  size_only?: boolean
   definition: LabelDefinition
+}
+
+export type LabelResizeHandle = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w"
+
+export const LABEL_CORNER_RESIZE_HANDLES: LabelResizeHandle[] = ["nw", "ne", "se", "sw"]
+
+export function isLabelCornerResizeHandle(handle: LabelResizeHandle): boolean {
+  return LABEL_CORNER_RESIZE_HANDLES.includes(handle)
+}
+
+function roundMm10(value: number): number {
+  return Math.round(value * 10) / 10
+}
+
+const LABEL_ELEMENT_MIN_SIZE_MM = 1
+
+/**
+ * Resize box from a handle. Corner handles keep aspect ratio; edge handles resize freely.
+ * Opposite corner/edge stays anchored.
+ */
+export function resizeLabelElementBox(
+  origin: { x: number; y: number; width: number; height: number },
+  handle: LabelResizeHandle,
+  dx: number,
+  dy: number,
+  labelWidth: number,
+  labelHeight: number,
+  proportional = isLabelCornerResizeHandle(handle),
+): { x: number; y: number; width: number; height: number } {
+  const min = LABEL_ELEMENT_MIN_SIZE_MM
+  const ow = Math.max(min, origin.width)
+  const oh = Math.max(min, origin.height)
+  const aspect = ow / oh
+
+  let x = origin.x
+  let y = origin.y
+  let width = ow
+  let height = oh
+
+  const applyFree = () => {
+    switch (handle) {
+      case "e":
+        width = ow + dx
+        break
+      case "w":
+        width = ow - dx
+        x = origin.x + dx
+        break
+      case "s":
+        height = oh + dy
+        break
+      case "n":
+        height = oh - dy
+        y = origin.y + dy
+        break
+      case "se":
+        width = ow + dx
+        height = oh + dy
+        break
+      case "sw":
+        width = ow - dx
+        height = oh + dy
+        x = origin.x + dx
+        break
+      case "ne":
+        width = ow + dx
+        height = oh - dy
+        y = origin.y + dy
+        break
+      case "nw":
+        width = ow - dx
+        height = oh - dy
+        x = origin.x + dx
+        y = origin.y + dy
+        break
+    }
+  }
+
+  const applyProportional = () => {
+    // Pick the dominant delta relative to aspect so drag feels natural.
+    let newW: number
+    let newH: number
+    switch (handle) {
+      case "se": {
+        const candW = ow + dx
+        const candH = oh + dy
+        if (Math.abs(dx) * oh >= Math.abs(dy) * ow) {
+          newW = candW
+          newH = newW / aspect
+        } else {
+          newH = candH
+          newW = newH * aspect
+        }
+        width = newW
+        height = newH
+        break
+      }
+      case "nw": {
+        const candW = ow - dx
+        const candH = oh - dy
+        if (Math.abs(dx) * oh >= Math.abs(dy) * ow) {
+          newW = candW
+          newH = newW / aspect
+        } else {
+          newH = candH
+          newW = newH * aspect
+        }
+        width = newW
+        height = newH
+        x = origin.x + ow - width
+        y = origin.y + oh - height
+        break
+      }
+      case "ne": {
+        const candW = ow + dx
+        const candH = oh - dy
+        if (Math.abs(dx) * oh >= Math.abs(dy) * ow) {
+          newW = candW
+          newH = newW / aspect
+        } else {
+          newH = candH
+          newW = newH * aspect
+        }
+        width = newW
+        height = newH
+        y = origin.y + oh - height
+        break
+      }
+      case "sw": {
+        const candW = ow - dx
+        const candH = oh + dy
+        if (Math.abs(dx) * oh >= Math.abs(dy) * ow) {
+          newW = candW
+          newH = newW / aspect
+        } else {
+          newH = candH
+          newW = newH * aspect
+        }
+        width = newW
+        height = newH
+        x = origin.x + ow - width
+        break
+      }
+      default:
+        applyFree()
+        return
+    }
+  }
+
+  if (proportional && isLabelCornerResizeHandle(handle)) {
+    applyProportional()
+  } else {
+    applyFree()
+  }
+
+  // Enforce minimum size while keeping the anchored edge fixed.
+  if (width < min) {
+    if (handle === "w" || handle === "nw" || handle === "sw") {
+      x = origin.x + ow - min
+    }
+    width = min
+    if (proportional && isLabelCornerResizeHandle(handle)) {
+      height = Math.max(min, width / aspect)
+      if (handle === "nw" || handle === "ne") {
+        y = origin.y + oh - height
+      }
+    }
+  }
+  if (height < min) {
+    if (handle === "n" || handle === "nw" || handle === "ne") {
+      y = origin.y + oh - min
+    }
+    height = min
+    if (proportional && isLabelCornerResizeHandle(handle)) {
+      width = Math.max(min, height * aspect)
+      if (handle === "nw" || handle === "sw") {
+        x = origin.x + ow - width
+      }
+    }
+  }
+
+  // Clamp inside label; shrink from the moving edges if needed.
+  if (x < 0) {
+    width = Math.max(min, width + x)
+    x = 0
+  }
+  if (y < 0) {
+    height = Math.max(min, height + y)
+    y = 0
+  }
+  if (x + width > labelWidth) {
+    width = Math.max(min, labelWidth - x)
+  }
+  if (y + height > labelHeight) {
+    height = Math.max(min, labelHeight - y)
+  }
+
+  if (proportional && isLabelCornerResizeHandle(handle) && height > 0) {
+    const clampedAspect = width / height
+    if (Math.abs(clampedAspect - aspect) > 0.001) {
+      // Re-fit to aspect within remaining room from the anchored corner.
+      const maxW = handle === "nw" || handle === "sw" ? origin.x + ow - x : labelWidth - x
+      const maxH = handle === "nw" || handle === "ne" ? origin.y + oh - y : labelHeight - y
+      width = Math.min(width, maxW)
+      height = Math.min(height, maxH)
+      if (width / aspect <= height) {
+        height = width / aspect
+      } else {
+        width = height * aspect
+      }
+      if (handle === "nw" || handle === "sw") {
+        x = origin.x + ow - width
+      }
+      if (handle === "nw" || handle === "ne") {
+        y = origin.y + oh - height
+      }
+      x = Math.max(0, x)
+      y = Math.max(0, y)
+    }
+  }
+
+  return {
+    x: roundMm10(Math.max(0, x)),
+    y: roundMm10(Math.max(0, y)),
+    width: roundMm10(Math.max(min, width)),
+    height: roundMm10(Math.max(min, height)),
+  }
+}
+
+/** CSS rotate(θ) (clockwise, Y-down) inverse: screen delta → local (unrotated) delta. */
+export function screenDeltaToLocalElementDelta(
+  dx: number,
+  dy: number,
+  rotationDeg: number,
+): { dx: number; dy: number } {
+  const rot = normalizeElementRotationDeg(rotationDeg)
+  if (rot === 0) {
+    return { dx, dy }
+  }
+  const rad = (rot * Math.PI) / 180
+  const c = Math.cos(rad)
+  const s = Math.sin(rad)
+  return {
+    dx: dx * c - dy * s,
+    dy: dx * s + dy * c,
+  }
+}
+
+/**
+ * Keep geometric center fixed when width/height change (needed for CSS rotate about center).
+ */
+export function placeBoxKeepingCenter(
+  origin: { x: number; y: number; width: number; height: number },
+  nextWidth: number,
+  nextHeight: number,
+  labelWidth: number,
+  labelHeight: number,
+): { x: number; y: number; width: number; height: number } {
+  const min = LABEL_ELEMENT_MIN_SIZE_MM
+  let width = Math.max(min, nextWidth)
+  let height = Math.max(min, nextHeight)
+  width = Math.min(width, Math.max(min, labelWidth))
+  height = Math.min(height, Math.max(min, labelHeight))
+
+  const cx = origin.x + origin.width / 2
+  const cy = origin.y + origin.height / 2
+  let x = cx - width / 2
+  let y = cy - height / 2
+  x = Math.max(0, Math.min(x, labelWidth - width))
+  y = Math.max(0, Math.min(y, labelHeight - height))
+
+  return {
+    x: roundMm10(x),
+    y: roundMm10(y),
+    width: roundMm10(width),
+    height: roundMm10(height),
+  }
 }
 
 export type LabelPrintRotationDeg = 0 | 90
@@ -118,6 +429,230 @@ export function offsetAllLabelElements(
     x: Math.round(Math.max(0, Math.min(el.x + dx, Math.max(0, labelWidth - el.width))) * 10) / 10,
     y: Math.round(Math.max(0, Math.min(el.y + dy, Math.max(0, labelHeight - el.height))) * 10) / 10,
   }))
+}
+
+export const LABEL_ELEMENT_SCALE_STEP = 1.1
+
+function scaleLabelFontSize(fontSize: number | undefined, factor: number): number | undefined {
+  if (fontSize == null) {
+    return undefined
+  }
+  return Math.round(Math.max(4, fontSize * factor) * 2) / 2
+}
+
+/**
+ * Scale all elements uniformly about their combined bounding-box center.
+ * Also scales fontSize, strokeWidth, and table colWidths / cell fonts.
+ */
+export function scaleAllLabelElements(
+  elements: LabelElement[],
+  factor: number,
+  labelWidth: number,
+  labelHeight: number,
+): LabelElement[] {
+  if (elements.length === 0 || !Number.isFinite(factor) || factor <= 0 || factor === 1) {
+    return elements
+  }
+
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+  for (const el of elements) {
+    minX = Math.min(minX, el.x)
+    minY = Math.min(minY, el.y)
+    maxX = Math.max(maxX, el.x + el.width)
+    maxY = Math.max(maxY, el.y + el.height)
+  }
+  const cx = (minX + maxX) / 2
+  const cy = (minY + maxY) / 2
+  const minSize = LABEL_ELEMENT_MIN_SIZE_MM
+
+  return elements.map((el) => {
+    let width = Math.max(minSize, el.width * factor)
+    let height = Math.max(minSize, el.height * factor)
+    let x = cx + (el.x - cx) * factor
+    let y = cy + (el.y - cy) * factor
+
+    width = Math.min(width, Math.max(minSize, labelWidth))
+    height = Math.min(height, Math.max(minSize, labelHeight))
+    x = Math.max(0, Math.min(x, Math.max(0, labelWidth - width)))
+    y = Math.max(0, Math.min(y, Math.max(0, labelHeight - height)))
+
+    const next: LabelElement = {
+      ...el,
+      x: roundMm10(x),
+      y: roundMm10(y),
+      width: roundMm10(width),
+      height: roundMm10(height),
+      fontSize: scaleLabelFontSize(el.fontSize, factor),
+      strokeWidth:
+        el.strokeWidth != null
+          ? Math.round(Math.max(0.1, el.strokeWidth * factor) * 100) / 100
+          : el.strokeWidth,
+    }
+
+    if (el.type === "table") {
+      const cols = el.cols ?? 1
+      const scaledCols =
+        el.colWidths?.map((w) => roundMm10(Math.max(0.1, w * factor))) ??
+        equalTableColWidths(cols, next.width)
+      next.colWidths = normalizeTableColWidths(cols, next.width, scaledCols)
+      if (el.cells) {
+        next.cells = el.cells.map((cell) => ({
+          ...cell,
+          fontSize: scaleLabelFontSize(cell.fontSize, factor),
+        }))
+      }
+    }
+
+    return next
+  })
+}
+
+/** Tanlangan id lar + ularning groupId a'zolari. */
+export function expandSelectionWithGroups(elements: LabelElement[], ids: string[]): string[] {
+  const idSet = new Set(ids)
+  const groupIds = new Set<string>()
+  for (const el of elements) {
+    if (idSet.has(el.id) && el.groupId) {
+      groupIds.add(el.groupId)
+    }
+  }
+  if (groupIds.size === 0) {
+    return [...idSet]
+  }
+  for (const el of elements) {
+    if (el.groupId && groupIds.has(el.groupId)) {
+      idSet.add(el.id)
+    }
+  }
+  return [...idSet]
+}
+
+/** Guruh a'zolari (groupId bo'yicha). */
+export function elementIdsInGroup(elements: LabelElement[], groupId: string): string[] {
+  return elements.filter((el) => el.groupId === groupId).map((el) => el.id)
+}
+
+/**
+ * Tanlangan elementlarni birga siljitadi; nisbiy joylashuv saqlanadi
+ * (to'plam bounding box label ichida qoladi).
+ */
+export function offsetLabelElementsByIds(
+  elements: LabelElement[],
+  ids: string[],
+  dx: number,
+  dy: number,
+  labelWidth: number,
+  labelHeight: number,
+): LabelElement[] {
+  if (dx === 0 && dy === 0) {
+    return elements
+  }
+  const idSet = new Set(ids)
+  const selected = elements.filter((el) => idSet.has(el.id))
+  if (selected.length === 0) {
+    return elements
+  }
+
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+  for (const el of selected) {
+    minX = Math.min(minX, el.x)
+    minY = Math.min(minY, el.y)
+    maxX = Math.max(maxX, el.x + el.width)
+    maxY = Math.max(maxY, el.y + el.height)
+  }
+
+  const clampedDx = Math.max(-minX, Math.min(dx, Math.max(0, labelWidth - maxX)))
+  const clampedDy = Math.max(-minY, Math.min(dy, Math.max(0, labelHeight - maxY)))
+  if (clampedDx === 0 && clampedDy === 0) {
+    return elements
+  }
+
+  return elements.map((el) => {
+    if (!idSet.has(el.id)) {
+      return el
+    }
+    return {
+      ...el,
+      x: Math.round((el.x + clampedDx) * 10) / 10,
+      y: Math.round((el.y + clampedDy) * 10) / 10,
+    }
+  })
+}
+
+/** Origins dan hisoblangan absolute offset (drag paytida). */
+export function applyLabelElementDragFromOrigins(
+  elements: LabelElement[],
+  origins: Record<string, { x: number; y: number }>,
+  dx: number,
+  dy: number,
+  labelWidth: number,
+  labelHeight: number,
+): LabelElement[] {
+  const ids = Object.keys(origins)
+  if (ids.length === 0) {
+    return elements
+  }
+
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+  for (const el of elements) {
+    const orig = origins[el.id]
+    if (!orig) {
+      continue
+    }
+    minX = Math.min(minX, orig.x)
+    minY = Math.min(minY, orig.y)
+    maxX = Math.max(maxX, orig.x + el.width)
+    maxY = Math.max(maxY, orig.y + el.height)
+  }
+
+  const clampedDx = Math.max(-minX, Math.min(dx, Math.max(0, labelWidth - maxX)))
+  const clampedDy = Math.max(-minY, Math.min(dy, Math.max(0, labelHeight - maxY)))
+
+  return elements.map((el) => {
+    const orig = origins[el.id]
+    if (!orig) {
+      return el
+    }
+    return {
+      ...el,
+      x: Math.round((orig.x + clampedDx) * 10) / 10,
+      y: Math.round((orig.y + clampedDy) * 10) / 10,
+    }
+  })
+}
+
+export function groupLabelElements(elements: LabelElement[], ids: string[]): LabelElement[] {
+  if (ids.length < 2) {
+    return elements
+  }
+  const idSet = new Set(ids)
+  const groupId = createElementId().replace(/^el-/, "grp-")
+  return elements.map((el) => (idSet.has(el.id) ? { ...el, groupId } : el))
+}
+
+export function ungroupLabelElements(elements: LabelElement[], ids: string[]): LabelElement[] {
+  const idSet = new Set(ids)
+  return elements.map((el) => {
+    if (!idSet.has(el.id) || !el.groupId) {
+      return el
+    }
+    const { groupId: _removed, ...rest } = el
+    return rest
+  })
+}
+
+export function selectionHasGroup(elements: LabelElement[], ids: string[]): boolean {
+  const idSet = new Set(ids)
+  return elements.some((el) => idSet.has(el.id) && Boolean(el.groupId))
 }
 
 export const DEFAULT_LABEL_DEFINITION: LabelDefinition = {
@@ -444,32 +979,42 @@ export function getTableCell(element: LabelElement, row: number, col: number): L
 export function normalizeElement(element: LabelElement): LabelElement {
   const withZIndex =
     element.zIndex == null ? element : { ...element, zIndex: Math.round(element.zIndex) }
-  const dataSource = inferDataSource(withZIndex)
-  if (withZIndex.type === "text") {
-    if (dataSource === "static") {
-      return { ...withZIndex, dataSource, binding: undefined }
+  const withRotation: LabelElement = {
+    ...withZIndex,
+    rotationDeg: normalizeElementRotationDeg(withZIndex.rotationDeg),
+  }
+  const dataSource = inferDataSource(withRotation)
+  if (withRotation.type === "line") {
+    return {
+      ...withRotation,
+      orientation: normalizeLineOrientation(withRotation.orientation),
     }
-    return { ...withZIndex, dataSource, staticText: undefined }
   }
-  if (withZIndex.type === "barcode" || withZIndex.type === "datamatrix" || withZIndex.type === "qrcode") {
-    return { ...withZIndex, dataSource: "backend" }
+  if (withRotation.type === "text") {
+    if (dataSource === "static") {
+      return { ...withRotation, dataSource, binding: undefined }
+    }
+    return { ...withRotation, dataSource, staticText: undefined }
   }
-  if (withZIndex.type === "table") {
-    const rows = clampTableRows(withZIndex.rows ?? 2)
-    const cols = clampTableCols(withZIndex.cols ?? 3)
-    let cells = withZIndex.cells
+  if (withRotation.type === "barcode" || withRotation.type === "datamatrix" || withRotation.type === "qrcode") {
+    return { ...withRotation, dataSource: "backend" }
+  }
+  if (withRotation.type === "table") {
+    const rows = clampTableRows(withRotation.rows ?? 2)
+    const cols = clampTableCols(withRotation.cols ?? 3)
+    let cells = withRotation.cells
     if (!cells || cells.length !== rows * cols) {
-      cells = resizeTableCells(cells ?? [], withZIndex.rows ?? rows, withZIndex.cols ?? cols, rows, cols)
+      cells = resizeTableCells(cells ?? [], withRotation.rows ?? rows, withRotation.cols ?? cols, rows, cols)
     }
     return {
-      ...withZIndex,
+      ...withRotation,
       rows,
       cols,
       cells: cells.map(normalizeTableCell),
-      colWidths: normalizeTableColWidths(cols, withZIndex.width, withZIndex.colWidths),
+      colWidths: normalizeTableColWidths(cols, withRotation.width, withRotation.colWidths),
     }
   }
-  return withZIndex
+  return withRotation
 }
 
 export function createStaticTextElement(text = "Matn"): LabelElement {
@@ -589,7 +1134,13 @@ export function createDefaultElement(type: LabelElementType): LabelElement {
     case "image":
       return { ...base, width: 20, height: 10, src: "" }
     case "line":
-      return { ...base, height: 0.5, width: 40, strokeWidth: 0.3 }
+      return normalizeElement({
+        ...base,
+        height: 0.5,
+        width: 40,
+        strokeWidth: 0.3,
+        orientation: "horizontal",
+      })
     case "rect":
       return { ...base, width: 40, height: 25, strokeWidth: 0.3 }
     case "table":
@@ -597,6 +1148,20 @@ export function createDefaultElement(type: LabelElementType): LabelElement {
     default:
       return base
   }
+}
+
+export function createVerticalLineElement(): LabelElement {
+  return normalizeElement({
+    id: createElementId(),
+    type: "line",
+    x: 5,
+    y: 5,
+    width: 0.5,
+    height: 40,
+    zIndex: 1,
+    strokeWidth: 0.3,
+    orientation: "vertical",
+  })
 }
 
 export function parseDefinition(raw: unknown): LabelDefinition {

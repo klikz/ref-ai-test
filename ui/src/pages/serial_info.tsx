@@ -62,6 +62,8 @@ type SerialInfoCompressor = {
   compressor_serial?: string
   acc_serial?: string
   door_serial?: string
+  freeze_door_serial?: string
+  ref_door_serial?: string
   gscode?: string
   model_id?: number
   modeli?: string
@@ -396,6 +398,8 @@ export default function SerialInfoPage() {
                     mono
                   />
                   <InfoRow label="Door serial" value={data.compressor?.door_serial} mono />
+                  <InfoRow label="Freeze door" value={data.compressor?.freeze_door_serial} mono />
+                  <InfoRow label="Ref door" value={data.compressor?.ref_door_serial} mono />
                   {data.compressor?.serial_number &&
                     data.compressor.serial_number !== data.serial && (
                       <InfoRow

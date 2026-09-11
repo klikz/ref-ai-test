@@ -259,7 +259,7 @@ export default function YigishPage() {
 
   return (
     <PageContainer
-      title="Yi'g'ish liniyasi"
+      title="Boshlang'ich yig'uv uchastkasi"
       description={[planDate, shiftLabel, planStatus ? `Reja: ${planStatus}` : ""]
         .filter(Boolean)
         .join(" · ")}

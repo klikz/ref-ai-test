@@ -110,7 +110,7 @@ export default function ProductBalancePage() {
   return (
     <PageContainer
       title="Mahsulot balansi"
-      description="T1, T2, T3 liniyalaridagi faol serial (WIP)"
+      description="Boshlang'ich yig'uv, T1–T3 va Yakuniy yig'uv uchastkalaridagi faol serial (WIP)"
       fullWidth
       actions={
         <div className="flex flex-wrap items-center gap-2">

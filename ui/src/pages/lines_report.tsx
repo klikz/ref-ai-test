@@ -179,8 +179,8 @@ function modelDropdownLabel(model: Model) {
 const filterCardClassName =
     "flex flex-col gap-2 rounded-2xl border border-border/60 bg-card/80 p-3 shadow-sm"
 
-const MAIN_REPORT_LINE_IDS = new Set([4, 5, 6, 7])
-const AUX_REPORT_LINE_IDS = new Set([8, 9, 10])
+const MAIN_REPORT_LINE_IDS = new Set(PLAN_PRODUCT_LINE_IDS)
+const AUX_REPORT_LINE_IDS = new Set(PLAN_AUX_LINE_IDS)
 
 function formatBalanceQty(value: number) {
     return Number(value).toLocaleString(undefined, { maximumFractionDigits: 4 })
@@ -189,7 +189,7 @@ function formatBalanceQty(value: number) {
 function aggregateAuxPlanRows(rows: PlanItemRow[]): AuxPlanSummaryRow[] {
     const map = new Map<string, AuxPlanSummaryRow>()
     for (const row of rows) {
-        const componentId = row.component_id || row.model_id
+        const componentId = row.component_id || row.model_id || row.item_key
         if (componentId <= 0) {
             continue
         }
@@ -213,6 +213,9 @@ function aggregateAuxPlanRows(rows: PlanItemRow[]): AuxPlanSummaryRow[] {
         }
         item.planned_qty += Number(row.planned_qty) || 0
         item.actual_qty += Number(row.actual_qty) || 0
+        if (!item.label && row.label) {
+            item.label = row.label
+        }
         if (!item.odoo_code && row.odoo_code) {
             item.odoo_code = row.odoo_code
         }

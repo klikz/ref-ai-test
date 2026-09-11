@@ -136,3 +136,21 @@ func (r *Repo) PrintersV2Delete(id int) error {
 	}
 	return nil
 }
+
+func (r *Repo) PrintersV2UpdateLanguage(id int, printLanguage string) error {
+	res, err := r.store.db.Exec(`
+		UPDATE lines.printers_v2
+		SET print_language = $2
+		WHERE id = $1`, id, printLanguage)
+	if err != nil {
+		return err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return errors.New("printer v2 not found")
+	}
+	return nil
+}

@@ -37,7 +37,7 @@ export function AppSidebar() {
         </div>
         {!collapsed && (
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-semibold tracking-tight">Premier AC</p>
+            <p className="truncate text-sm font-semibold tracking-tight">Premier REF</p>
             <p className="truncate text-xs text-muted-foreground">Ishlab chiqarish</p>
           </div>
         )}

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/klikz/api_v3/internal/models"
 	"github.com/klikz/api_v3/internal/store"
 	"github.com/klikz/api_v3/utils"
 	"github.com/xuri/excelize/v2"
@@ -21,15 +22,15 @@ type consumptionNormUploadConflict struct {
 }
 
 type consumptionNormParsedRow struct {
-	Row            int
-	GroupLevel     int
-	FactoryCode    string
-	Quantity       float64
-	ConsumeLine    string
-	ReceiveLine    string
-	ComponentID    int
-	ConsumeLineID  int
-	ReceiveLineID  int
+	Row           int
+	GroupLevel    int
+	FactoryCode   string
+	Quantity      float64
+	ConsumeLine   string
+	ReceiveLine   string
+	ComponentID   int
+	ConsumeLineID int
+	ReceiveLineID int
 }
 
 func (s *ServerModel) ConsumptionNormModels(c *gin.Context) {
@@ -266,6 +267,60 @@ func (s *ServerModel) ConsumptionNormItems(c *gin.Context) {
 	s.Utils.SendOK(c, data)
 }
 
+const (
+	consumptionNormBOMSheet     = "BOM list"
+	consumptionNormLinesSheet   = "Liniyalar"
+	consumptionNormDataStart    = 4
+	consumptionNormDropdownRows = 200
+)
+
+func consumptionNormWriteLinesSheet(f *excelize.File, lines []models.LineLookup) error {
+	if _, err := f.NewSheet(consumptionNormLinesSheet); err != nil {
+		// sheet may already exist when renaming Sheet1 elsewhere; ignore duplicate
+		if idx, idxErr := f.GetSheetIndex(consumptionNormLinesSheet); idxErr != nil || idx < 0 {
+			return err
+		}
+	}
+	_ = f.SetCellValue(consumptionNormLinesSheet, "A1", "line_id")
+	_ = f.SetCellValue(consumptionNormLinesSheet, "B1", "liniya nomi")
+	for i, line := range lines {
+		row := i + 2
+		_ = f.SetCellValue(consumptionNormLinesSheet, "A"+strconv.Itoa(row), line.LineID)
+		_ = f.SetCellValue(consumptionNormLinesSheet, "B"+strconv.Itoa(row), line.Name)
+	}
+	_ = f.SetColWidth(consumptionNormLinesSheet, "A", "A", 10)
+	_ = f.SetColWidth(consumptionNormLinesSheet, "B", "B", 28)
+	return nil
+}
+
+func consumptionNormApplyLineDropdowns(f *excelize.File, bomSheet string, lineCount, toRow int) error {
+	if lineCount < 1 || toRow < consumptionNormDataStart {
+		return nil
+	}
+	listRef := consumptionNormLinesSheet + "!$B$2:$B$" + strconv.Itoa(lineCount+1)
+	for _, col := range []string{"E", "F"} {
+		dv := excelize.NewDataValidation(true)
+		dv.Sqref = col + strconv.Itoa(consumptionNormDataStart) + ":" + col + strconv.Itoa(toRow)
+		dv.SetSqrefDropList(listRef)
+		dv.SetError(excelize.DataValidationErrorStyleStop, "Noto'g'ri qiymat", "Ro'yxatdan liniya tanlang")
+		dv.SetInput("Liniya", "Liniyalar sheetidan tanlang")
+		if err := f.AddDataValidation(bomSheet, dv); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func consumptionNormFindBOMSheet(f *excelize.File) string {
+	for _, name := range f.GetSheetList() {
+		lower := strings.ToLower(strings.TrimSpace(name))
+		if lower == "bom list" || lower == "bom" {
+			return name
+		}
+	}
+	return f.GetSheetName(0)
+}
+
 func (s *ServerModel) ConsumptionNormTemplate(c *gin.Context) {
 	lines, err := s.Store.Repo().LinesListForLookup()
 	if err != nil {
@@ -275,7 +330,7 @@ func (s *ServerModel) ConsumptionNormTemplate(c *gin.Context) {
 
 	f := excelize.NewFile()
 	defer f.Close()
-	sheetName := "BOM list"
+	sheetName := consumptionNormBOMSheet
 	if err := f.SetSheetName("Sheet1", sheetName); err != nil {
 		s.Utils.SendError(c, err, "ConsumptionNormTemplate: SetSheetName", "")
 		return
@@ -296,10 +351,16 @@ func (s *ServerModel) ConsumptionNormTemplate(c *gin.Context) {
 		_ = f.SetCellValue(sheetName, cell, header)
 	}
 
-	_ = f.SetCellValue(sheetName, "J2", "liniyalar nomi")
-	for i, line := range lines {
-		_ = f.SetCellValue(sheetName, "J"+strconv.Itoa(i+3), line.Name)
+	if err := consumptionNormWriteLinesSheet(f, lines); err != nil {
+		s.Utils.SendError(c, err, "ConsumptionNormTemplate: lines sheet", "")
+		return
 	}
+	toRow := consumptionNormDataStart + consumptionNormDropdownRows - 1
+	if err := consumptionNormApplyLineDropdowns(f, sheetName, len(lines), toRow); err != nil {
+		s.Utils.SendError(c, err, "ConsumptionNormTemplate: dropdowns", "")
+		return
+	}
+	f.SetActiveSheet(0)
 
 	buffer, err := f.WriteToBuffer()
 	if err != nil {
@@ -345,7 +406,7 @@ func (s *ServerModel) ConsumptionNormUpload(c *gin.Context) {
 		_ = f.Close()
 	}()
 
-	sheetName := f.GetSheetName(0)
+	sheetName := consumptionNormFindBOMSheet(f)
 	rows, err := f.GetRows(sheetName)
 	if err != nil {
 		s.Utils.SendError(c, err, "ConsumptionNormUpload: GetRows", "")

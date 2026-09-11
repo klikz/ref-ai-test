@@ -134,6 +134,45 @@ func (u *UtilsStruct) ProdLogAny(data ...any) {
 	u.Logger.Info().Msg(fmt.Sprintf("%v", data))
 }
 
+// PrintLogWarn — printer muammolari (spool stuck, retry, GDI mismatch). Info+ level'da ko'rinadi.
+func (u *UtilsStruct) PrintLogWarn(msg string, fields map[string]any) {
+	u.printLogAt(zerolog.WarnLevel, msg, fields)
+}
+
+// PrintLogError — yakuniy print xatosi.
+func (u *UtilsStruct) PrintLogError(msg string, fields map[string]any) {
+	u.printLogAt(zerolog.ErrorLevel, msg, fields)
+}
+
+func (u *UtilsStruct) printLogAt(level zerolog.Level, msg string, fields map[string]any) {
+	if u == nil || u.Logger == nil {
+		return
+	}
+	ev := u.Logger.WithLevel(level).Str("component", "print_v2")
+	for k, v := range fields {
+		if k == "" || v == nil {
+			continue
+		}
+		switch t := v.(type) {
+		case string:
+			ev = ev.Str(k, t)
+		case int:
+			ev = ev.Int(k, t)
+		case int64:
+			ev = ev.Int64(k, t)
+		case bool:
+			ev = ev.Bool(k, t)
+		case float64:
+			ev = ev.Float64(k, t)
+		case time.Duration:
+			ev = ev.Dur(k, t)
+		default:
+			ev = ev.Interface(k, t)
+		}
+	}
+	ev.Msg(msg)
+}
+
 func (u *UtilsStruct) ReadBody(c *gin.Context) (map[string]any, error) {
 	bodyAsByteArray, err := io.ReadAll(c.Request.Body)
 	if err != nil {

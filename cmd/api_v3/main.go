@@ -19,6 +19,11 @@ import (
 )
 
 func main() {
+	// TSPL/ZPL RAW print child processes enter here and never start the API.
+	if utils.MaybeRunPrintWorker(os.Args) {
+		return
+	}
+
 	//init config
 
 	err := godotenv.Load()
@@ -92,6 +97,9 @@ func main() {
 	}
 
 	utils.InitPrintPool(envInt("PRINT_MAX_WORKERS", 8))
+	utils.InitPrintPoolV2(envInt("PRINT_V2_MAX_WORKERS", 8))
+	utils.StartPrintWorkers()
+	defer utils.StopAllPrintWorkers()
 
 	//run server
 	err = api.StartSrv(os.Getenv("PORT"), log_level, &logger, *storeInst)

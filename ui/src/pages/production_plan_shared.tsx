@@ -1,16 +1,27 @@
 import { Global_Data } from "@/config/config"
 import { Backend_Request } from "@/services/backend"
 
-export const PLAN_PRODUCT_LINE_IDS: readonly number[] = [1]
-export const PLAN_AUX_LINE_IDS: readonly number[] = [11]
+export const PLAN_PRODUCT_LINE_IDS: readonly number[] = [1, 12]
+export const PLAN_AUX_LINE_IDS: readonly number[] = [20]
 
 export const PLAN_LINES: readonly { line_id: number; name: string }[] = [
-  { line_id: 1, name: "Yi'g'ish liniyasi" },
-  { line_id: 11, name: "Eshik liniyasi" },
+  { line_id: 20, name: "Eshik yig'uv va eshikka PPU quyish uchastkasi" },
+  { line_id: 1, name: "Boshlang'ich yig'uv uchastkasi" },
+  { line_id: 12, name: "Yakuniy yig'uv uchastkasi" },
 ]
 
 export const YIGISH_LINE_ID = 1
-export const ESHIK_LINE_ID = 11
+export const ESHIK_LINE_ID = 20
+export const QADOQLASH_LINE_ID = 12
+
+/** Reja hisoboti / export uchun faol liniyalar (Boshlang'ich, Eshik, Yakuniy). */
+export function allPlanLineIds(): number[] {
+  return PLAN_LINES.map((line) => line.line_id)
+}
+
+export function isPlanProductLine(lineId: number): boolean {
+  return (PLAN_PRODUCT_LINE_IDS as readonly number[]).includes(lineId)
+}
 
 export type PlanItemRow = {
   id: number

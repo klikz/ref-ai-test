@@ -44,6 +44,19 @@ func officePrinterNameFastPath(printerName string) (bool, string) {
 	return false, ""
 }
 
+// Gprinter / Gainscha / XPrinter — native TSPL only for these brands.
+// Other printers keep existing Zebra ZPL / TSC TSPL / GDI (Windows settings) behavior.
+func matchGprinterOrXPrinter(driverLower, printerLower string) (string, bool) {
+	keywords := []string{"gprinter", "gainscha", "xprinter"}
+	blob := driverLower + " | " + printerLower
+	for _, keyword := range keywords {
+		if strings.Contains(blob, keyword) {
+			return keyword, true
+		}
+	}
+	return "", false
+}
+
 func NormalizePrintLanguage(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case PrintLanguageTSPL:
@@ -78,7 +91,31 @@ func DetectPrinterLanguage(printerName string) (language string, driverName stri
 	driverName = ""
 	reason = "standart Windows printer (GDI)"
 
+	upperName := strings.ToUpper(printerName)
+	if strings.HasPrefix(upperName, "AC-FILE") {
+		switch {
+		case strings.Contains(upperName, "ZPL"):
+			language, reason = PrintLanguageZPL, "AC-FILE preview (ZPL → PNG)"
+		case strings.Contains(upperName, "TSPL"):
+			language, reason = PrintLanguageTSPL, "AC-FILE preview (TSPL → PNG)"
+		default:
+			language, reason = PrintLanguageGDI, "AC-FILE preview (PNG)"
+		}
+		storePrinterLanguageCache(printerName, language, driverName, reason)
+		return language, driverName, reason
+	}
+
 	if runtime.GOOS != "windows" || printerName == "" {
+		return language, driverName, reason
+	}
+
+	printerLower := strings.ToLower(printerName)
+
+	// Prefer brand name match so Gprinter/XPrinter are not forced to GDI
+	// when Windows reports a generic/IPP class driver.
+	if keyword, ok := matchGprinterOrXPrinter("", printerLower); ok {
+		language, reason = PrintLanguageTSPL, "Gprinter/XPrinter (nom): "+keyword
+		storePrinterLanguageCache(printerName, language, driverName, reason)
 		return language, driverName, reason
 	}
 
@@ -100,7 +137,12 @@ func DetectPrinterLanguage(printerName string) (language string, driverName stri
 
 	driverName = strings.TrimSpace(info.DriverName)
 	driverLower := strings.ToLower(driverName)
-	printerLower := strings.ToLower(strings.TrimSpace(printerName))
+
+	if keyword, ok := matchGprinterOrXPrinter(driverLower, printerLower); ok {
+		language, reason = PrintLanguageTSPL, "Gprinter/XPrinter: "+keyword
+		storePrinterLanguageCache(printerName, language, driverName, reason)
+		return language, driverName, reason
+	}
 
 	if isOfficePrinter(driverLower, printerLower) {
 		language, reason = PrintLanguageGDI, "ofis printeri (masalan Canon/HP) — faqat GDI, etiketka printeri tavsiya etiladi"
@@ -149,9 +191,34 @@ func storePrinterLanguageCache(printerName, language, driverName, reason string)
 	})
 }
 
+// InvalidatePrinterLanguageCache clears cached detect results (all or one printer).
+func InvalidatePrinterLanguageCache(printerName string) {
+	printerName = strings.TrimSpace(printerName)
+	if printerName == "" {
+		printerLanguageCache.Range(func(key, _ any) bool {
+			printerLanguageCache.Delete(key)
+			return true
+		})
+		return
+	}
+	printerLanguageCache.Delete(printerName)
+}
+
 func ResolvePrinterLanguage(printerName string) string {
 	language, _, _ := DetectPrinterLanguage(printerName)
 	return language
+}
+
+// ProductionPrintLanguageHint returns operator-facing guidance for a language.
+func ProductionPrintLanguageHint(language string) string {
+	switch NormalizePrintLanguage(language) {
+	case PrintLanguageZPL:
+		return "ZPL RAW — darkness/speed shablon sozlamalaridan (Windows Preferences emas). Production uchun tavsiya (Zebra)."
+	case PrintLanguageTSPL:
+		return "TSPL RAW — density/speed/gap shablon sozlamalaridan. Production uchun tavsiya (Gprinter/XPrinter/TSC)."
+	default:
+		return "GDI — Windows Printing Preferences. Zebra/Gprinter production uchun fallback; Test Print yoki «Windows sozlamalarini yangilash» kerak bo'lishi mumkin."
+	}
 }
 
 func RawSpoolDatatype(language string) string {
@@ -174,7 +241,10 @@ func supportsRawPassthrough(driverName, language string) bool {
 	case PrintLanguageTSPL:
 		return strings.Contains(driver, "tsc") ||
 			strings.Contains(driver, "godex") ||
-			strings.Contains(driver, "argox")
+			strings.Contains(driver, "argox") ||
+			strings.Contains(driver, "gprinter") ||
+			strings.Contains(driver, "gainscha") ||
+			strings.Contains(driver, "xprinter")
 	default:
 		return false
 	}

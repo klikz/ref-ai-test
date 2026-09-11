@@ -136,6 +136,26 @@ func (r *Repo) ProductUpdateAccSerial(productID int, accSerial string) error {
 	return err
 }
 
+// ProductUpdateQadoqlashDoors writes scanned freeze/ref door serials onto the active product row.
+func (r *Repo) ProductUpdateQadoqlashDoors(productID int, freezeDoorSerial, refDoorSerial string) error {
+	if productID <= 0 {
+		return errors.New("mahsulot id noto'g'ri")
+	}
+	freezeDoorSerial = strings.TrimSpace(freezeDoorSerial)
+	refDoorSerial = strings.TrimSpace(refDoorSerial)
+	if freezeDoorSerial == "" || refDoorSerial == "" {
+		return errors.New("freeze/ref door serial bo'sh")
+	}
+	_, err := r.store.db.Exec(`
+		UPDATE lines.products
+		SET freeze_door_serial = $2,
+			ref_door_serial = $3
+		WHERE id = $1`,
+		productID, freezeDoorSerial, refDoorSerial,
+	)
+	return err
+}
+
 func (r *Repo) ProductLineTransfer(
 	fromLineID, toLineID, componentID, userID, modelID int,
 	serial, accSerial string,

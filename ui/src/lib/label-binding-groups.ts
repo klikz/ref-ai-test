@@ -13,7 +13,7 @@ export function groupLabelBindings(bindings: LabelBinding[] = LABEL_BINDINGS): [
 
 /** Shtrix kod uchun backend maydonlar */
 export const BARCODE_BINDINGS = LABEL_BINDINGS.filter(
-  (b) => !b.key.startsWith("gscode.") && b.key !== "today",
+  (b) => !b.key.startsWith("gscode.") && b.key !== "today" && b.key !== "now",
 )
 
 /** DataMatrix uchun backend maydonlar */

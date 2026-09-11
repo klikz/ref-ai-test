@@ -1,18 +1,25 @@
-import { Barcode, Grid3x3, GripVertical, Image, Minus, QrCode, Square, Table, Type } from "lucide-react"
+import { Barcode, Grid3x3, GripVertical, Image, Minus, QrCode, SeparatorVertical, Square, Table, Type } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { LABEL_ELEMENT_DRAG_MIME, type LabelElementType } from "@/lib/label-types"
 
-const ELEMENTS: { type: LabelElementType; label: string; icon: typeof Type }[] = [
-  { type: "text", label: "Matn", icon: Type },
-  { type: "barcode", label: "Shtrix kod", icon: Barcode },
-  { type: "datamatrix", label: "DataMatrix", icon: Grid3x3 },
-  { type: "qrcode", label: "QR kod", icon: QrCode },
-  { type: "image", label: "Rasm", icon: Image },
-  { type: "line", label: "Chiziq", icon: Minus },
-  { type: "rect", label: "Ramka", icon: Square },
-  { type: "table", label: "Jadval", icon: Table },
+type PaletteItem = {
+  dragType: LabelElementType | "vline"
+  label: string
+  icon: typeof Type
+}
+
+const ELEMENTS: PaletteItem[] = [
+  { dragType: "text", label: "Matn", icon: Type },
+  { dragType: "barcode", label: "Shtrix kod", icon: Barcode },
+  { dragType: "datamatrix", label: "DataMatrix", icon: Grid3x3 },
+  { dragType: "qrcode", label: "QR kod", icon: QrCode },
+  { dragType: "image", label: "Rasm", icon: Image },
+  { dragType: "line", label: "Chiziq", icon: Minus },
+  { dragType: "vline", label: "Vertikal chiziq", icon: SeparatorVertical },
+  { dragType: "rect", label: "Ramka", icon: Square },
+  { dragType: "table", label: "Jadval", icon: Table },
 ]
 
 export function ElementPalette() {
@@ -21,9 +28,9 @@ export function ElementPalette() {
       <p className="text-xs text-muted-foreground">
         Elementni maket ustiga sudrab tashlang. Jadval uchun o&apos;lcham so&apos;raladi.
       </p>
-      {ELEMENTS.map(({ type, label, icon: Icon }) => (
+      {ELEMENTS.map(({ dragType, label, icon: Icon }) => (
         <Button
-          key={type}
+          key={dragType}
           type="button"
           variant="outline"
           draggable
@@ -32,8 +39,8 @@ export function ElementPalette() {
             "hover:border-primary/50",
           )}
           onDragStart={(e) => {
-            e.dataTransfer.setData(LABEL_ELEMENT_DRAG_MIME, type)
-            e.dataTransfer.setData("text/plain", type)
+            e.dataTransfer.setData(LABEL_ELEMENT_DRAG_MIME, dragType)
+            e.dataTransfer.setData("text/plain", dragType)
             e.dataTransfer.effectAllowed = "copy"
           }}
         >

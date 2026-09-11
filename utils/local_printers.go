@@ -22,6 +22,7 @@ type LocalPrintJob struct {
 	SubmittedTime string `json:"submitted_time"`
 	JobStatus     string `json:"job_status"`
 	TotalPages    int    `json:"total_pages"`
+	PagesPrinted  int    `json:"pages_printed"`
 	Size          int64  `json:"size"`
 }
 
@@ -45,7 +46,15 @@ func LocalPrinterJobs(printerName string) ([]LocalPrintJob, error) {
 	if strings.TrimSpace(printerName) == "" {
 		return nil, errors.New("printer nomi bo'sh")
 	}
+	jobs, err := localPrinterJobsWin32(strings.TrimSpace(printerName))
+	if err == nil {
+		return jobs, nil
+	}
+	// Fallback for exotic drivers / restricted accounts.
+	return localPrinterJobsPowerShell(printerName)
+}
 
+func localPrinterJobsPowerShell(printerName string) ([]LocalPrintJob, error) {
 	script := `
 $printerName = $env:AC_PRINTER_NAME
 if ([string]::IsNullOrWhiteSpace($printerName)) {
@@ -63,11 +72,11 @@ $jobs | ForEach-Object {
 		submitted_time = $_.SubmittedTime.ToString("yyyy-MM-dd HH:mm:ss")
 		job_status = $_.JobStatus.ToString()
 		total_pages = $_.TotalPages
+		pages_printed = 0
 		size = $_.Size
 	}
 } | ConvertTo-Json -Compress
 `
-
 	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", script)
 	cmd.Env = append(os.Environ(), "AC_PRINTER_NAME="+printerName)
 	out, err := cmd.CombinedOutput()

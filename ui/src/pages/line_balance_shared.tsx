@@ -49,8 +49,8 @@ export type BalanceTransaction = {
 export const DEFAULT_PAGE_SIZE = 50
 export const PAGE_SIZE_OPTIONS = [25, 50, 100, 200] as const
 
-/** Product assembly lines — no component balance in this screen. */
-export const LINE_BALANCE_EXCLUDED_LINE_IDS = [4, 5, 6, 7] as const
+/** Product lines (WIP serials) — report lives on /production/product-balance. */
+export const LINE_BALANCE_EXCLUDED_LINE_IDS = [1, 4, 5, 6, 7, 12] as const
 
 export const balanceColumnHelper = createColumnHelper<BalanceRow>()
 export const txColumnHelper = createColumnHelper<BalanceTransaction>()
@@ -267,7 +267,7 @@ export async function buildBalanceWorkbook(params: {
 }) {
   const ExcelJS = await import("exceljs")
   const workbook = new ExcelJS.Workbook()
-  workbook.creator = "Premier AC"
+  workbook.creator = "Premier REF"
   workbook.created = new Date()
 
   const balanceSheet = workbook.addWorksheet("Joriy balans")

@@ -211,6 +211,8 @@ export default function ConsumptionNormIdPage() {
   const [componentPickerOpen, setComponentPickerOpen] = useState(false)
   const [selectedAddComponent, setSelectedAddComponent] = useState<ProductionComponent | null>(null)
   const [addQuantity, setAddQuantity] = useState("")
+  const [addConsumeLineId, setAddConsumeLineId] = useState(0)
+  const [addReceiveLineId, setAddReceiveLineId] = useState(0)
   const [adding, setAdding] = useState(false)
   const [deletingItem, setDeletingItem] = useState<NormItem | null>(null)
   const [deleting, setDeleting] = useState(false)
@@ -457,6 +459,8 @@ export default function ConsumptionNormIdPage() {
         component_id: selectedAddComponent.id,
         parent_id: addParentId,
         quantity,
+        consume_line_id: addConsumeLineId || undefined,
+        receive_line_id: addReceiveLineId || undefined,
       },
       "/api/production/consumption-norm/add",
     )
@@ -473,6 +477,8 @@ export default function ConsumptionNormIdPage() {
     setSelectedAddComponent(null)
     setAddComponentSearch("")
     setAddQuantity("")
+    setAddConsumeLineId(0)
+    setAddReceiveLineId(0)
     if (previousParentId > 0) {
       const parentIndex = allDisplayRows.findIndex((row) => row.item.id === previousParentId)
       if (parentIndex >= 0) {
@@ -1092,6 +1098,38 @@ export default function ConsumptionNormIdPage() {
                   inputMode="decimal"
                   className="h-10"
                 />
+              </div>
+
+              <div className="min-w-[180px] flex-1 space-y-1.5">
+                <label className="text-xs font-medium text-muted-foreground">Ishlatilish joyi</label>
+                <select
+                  value={addConsumeLineId}
+                  onChange={(event) => setAddConsumeLineId(Number(event.target.value))}
+                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                >
+                  <option value={0}>—</option>
+                  {lines.map((line) => (
+                    <option key={line.line_id} value={line.line_id}>
+                      {line.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="min-w-[180px] flex-1 space-y-1.5">
+                <label className="text-xs font-medium text-muted-foreground">i/ch joyi</label>
+                <select
+                  value={addReceiveLineId}
+                  onChange={(event) => setAddReceiveLineId(Number(event.target.value))}
+                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                >
+                  <option value={0}>—</option>
+                  {lines.map((line) => (
+                    <option key={line.line_id} value={line.line_id}>
+                      {line.name}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <Button

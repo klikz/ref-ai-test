@@ -34,6 +34,8 @@ type CompleteResponse = {
   serial?: string
   acc_serial?: string
   door_serial?: string
+  freeze_door_serial?: string
+  ref_door_serial?: string
   bx_result?: string
   compressor?: string
   bx_model?: string
@@ -46,7 +48,8 @@ type CompleteResponse = {
 type LastScan = {
   serial: string
   acc_serial: string
-  door_serial: string
+  freeze_door_serial: string
+  ref_door_serial: string
   modeli: string
   compressor: string
   bx_model: string
@@ -61,17 +64,24 @@ type SessionRow = {
   id: number
   serial: string
   acc_serial: string
-  door_serial: string
+  freeze_door_serial: string
+  ref_door_serial: string
   modeli: string
   time: string
 }
 
+type SessionApiRow = SessionRow & {
+  door_serial?: string
+}
+
 type SessionsLastResponse = {
-  sessions?: SessionRow[]
+  sessions?: SessionApiRow[]
   last_scan?: {
     serial?: string
     acc_serial?: string
     door_serial?: string
+    freeze_door_serial?: string
+    ref_door_serial?: string
     modeli?: string
     compressor?: string
     bx_model?: string
@@ -93,11 +103,13 @@ function InfoRow({ label, value, mono }: { label: string; value: string; mono?: 
 
 export default function QadoqlashPage() {
   const accRef = useRef<HTMLInputElement>(null)
-  const doorRef = useRef<HTMLInputElement>(null)
+  const freezeDoorRef = useRef<HTMLInputElement>(null)
+  const refDoorRef = useRef<HTMLInputElement>(null)
   const serialRef = useRef<HTMLInputElement>(null)
 
   const [accSerial, setAccSerial] = useState("")
-  const [doorSerial, setDoorSerial] = useState("")
+  const [freezeDoorSerial, setFreezeDoorSerial] = useState("")
+  const [refDoorSerial, setRefDoorSerial] = useState("")
   const [serial, setSerial] = useState("")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
@@ -118,7 +130,8 @@ export default function QadoqlashPage() {
 
   const clearAll = useCallback(() => {
     setAccSerial("")
-    setDoorSerial("")
+    setFreezeDoorSerial("")
+    setRefDoorSerial("")
     setSerial("")
   }, [])
 
@@ -154,7 +167,8 @@ export default function QadoqlashPage() {
       id: Number(row.id) || 0,
       serial: String(row.serial ?? ""),
       acc_serial: String(row.acc_serial ?? ""),
-      door_serial: String(row.door_serial ?? ""),
+      freeze_door_serial: String(row.freeze_door_serial ?? row.door_serial ?? ""),
+      ref_door_serial: String(row.ref_door_serial ?? ""),
       modeli: String(row.modeli ?? ""),
       time: String(row.time ?? ""),
     }))
@@ -165,7 +179,8 @@ export default function QadoqlashPage() {
       setLastScan({
         serial: scan.serial,
         acc_serial: scan.acc_serial || "",
-        door_serial: scan.door_serial || "",
+        freeze_door_serial: scan.freeze_door_serial || scan.door_serial || "",
+        ref_door_serial: scan.ref_door_serial || "",
         modeli: scan.modeli || "",
         compressor: scan.compressor || "",
         bx_model: scan.bx_model || "",
@@ -185,7 +200,8 @@ export default function QadoqlashPage() {
   useEffect(() => {
     if (reprintOnce) {
       setAccSerial("")
-      setDoorSerial("")
+      setFreezeDoorSerial("")
+      setRefDoorSerial("")
       focusSerial()
     } else {
       focusAcc()
@@ -218,15 +234,21 @@ export default function QadoqlashPage() {
   )
 
   const complete = useCallback(
-    async (acc: string, door: string, product: string, reprint: boolean) => {
+    async (acc: string, freezeDoor: string, refDoor: string, product: string, reprint: boolean) => {
       const p = product.trim()
       if (!p || loading) return
-      if (!reprint && (!acc.trim() || !door.trim())) return
+      if (!reprint && (!acc.trim() || !freezeDoor.trim() || !refDoor.trim())) return
 
       setLoading(true)
       const payload = reprint
         ? { serial: p, reprint: true }
-        : { acc_serial: acc.trim(), door_serial: door.trim(), serial: p, reprint: false }
+        : {
+            acc_serial: acc.trim(),
+            freeze_door_serial: freezeDoor.trim(),
+            ref_door_serial: refDoor.trim(),
+            serial: p,
+            reprint: false,
+          }
       const result = await Backend_Request<CompleteResponse>(
         payload,
         "/api/lines/qadoqlash/complete",
@@ -250,13 +272,15 @@ export default function QadoqlashPage() {
       const data = result.data
       const outSerial = data?.serial || p
       const outAcc = data?.acc_serial || acc.trim()
-      const outDoor = data?.door_serial || door.trim()
+      const outFreeze = data?.freeze_door_serial || data?.door_serial || freezeDoor.trim()
+      const outRef = data?.ref_door_serial || refDoor.trim()
       const outModel = data?.modeli || ""
 
       setLastScan({
         serial: outSerial,
         acc_serial: outAcc,
-        door_serial: outDoor,
+        freeze_door_serial: outFreeze,
+        ref_door_serial: outRef,
         modeli: outModel,
         compressor: data?.compressor || "",
         bx_model: data?.bx_model || "",
@@ -273,7 +297,8 @@ export default function QadoqlashPage() {
             id: Date.now(),
             serial: outSerial,
             acc_serial: outAcc,
-            door_serial: outDoor,
+            freeze_door_serial: outFreeze,
+            ref_door_serial: outRef,
             modeli: outModel,
             time,
           },
@@ -294,13 +319,20 @@ export default function QadoqlashPage() {
     if (event.key !== "Enter" || reprintOnce) return
     event.preventDefault()
     if (!accSerial.trim()) return
-    doorRef.current?.focus()
+    freezeDoorRef.current?.focus()
   }
 
-  function onDoorKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+  function onFreezeDoorKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
     if (event.key !== "Enter" || reprintOnce) return
     event.preventDefault()
-    if (!doorSerial.trim()) return
+    if (!freezeDoorSerial.trim()) return
+    refDoorRef.current?.focus()
+  }
+
+  function onRefDoorKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (event.key !== "Enter" || reprintOnce) return
+    event.preventDefault()
+    if (!refDoorSerial.trim()) return
     serialRef.current?.focus()
   }
 
@@ -308,7 +340,7 @@ export default function QadoqlashPage() {
     if (event.key !== "Enter") return
     event.preventDefault()
     if (!serial.trim()) return
-    void complete(accSerial, doorSerial, serial, reprintOnce)
+    void complete(accSerial, freezeDoorSerial, refDoorSerial, serial, reprintOnce)
   }
 
   const photoSrc =
@@ -318,7 +350,7 @@ export default function QadoqlashPage() {
 
   return (
     <PageContainer
-      title="Qadoqlash Liniyasi"
+      title="Yakuniy yig'uv uchastkasi"
       description="Acc → Eshik → Product serial; lab OK bo‘lsa chop etiladi"
     >
       {error ? (
@@ -360,7 +392,7 @@ export default function QadoqlashPage() {
             </label>
           </div>
 
-          <div className={cn("grid gap-4", reprintOnce ? "md:grid-cols-1" : "md:grid-cols-3")}>
+          <div className={cn("grid gap-4", reprintOnce ? "md:grid-cols-1" : "md:grid-cols-2 xl:grid-cols-4")}>
             {!reprintOnce ? (
               <>
                 <div className="space-y-2">
@@ -385,23 +417,44 @@ export default function QadoqlashPage() {
                 </div>
 
                 <div className="space-y-2">
-                  <label htmlFor="qadoq-door" className="text-sm font-medium">
-                    Eshik serial
+                  <label htmlFor="qadoq-freeze" className="text-sm font-medium">
+                    Freeze door
                   </label>
                   <Input
-                    id="qadoq-door"
-                    ref={doorRef}
-                    value={doorSerial}
+                    id="qadoq-freeze"
+                    ref={freezeDoorRef}
+                    value={freezeDoorSerial}
                     disabled={loading}
                     autoComplete="off"
                     spellCheck={false}
                     className="h-12 font-mono text-base"
-                    placeholder="Eshik skanerlang"
+                    placeholder="Freeze eshik"
                     onChange={(e) => {
                       clearErrorOnType()
-                      setDoorSerial(e.target.value)
+                      setFreezeDoorSerial(e.target.value)
                     }}
-                    onKeyDown={onDoorKeyDown}
+                    onKeyDown={onFreezeDoorKeyDown}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label htmlFor="qadoq-ref" className="text-sm font-medium">
+                    Ref door
+                  </label>
+                  <Input
+                    id="qadoq-ref"
+                    ref={refDoorRef}
+                    value={refDoorSerial}
+                    disabled={loading}
+                    autoComplete="off"
+                    spellCheck={false}
+                    className="h-12 font-mono text-base"
+                    placeholder="Ref eshik"
+                    onChange={(e) => {
+                      clearErrorOnType()
+                      setRefDoorSerial(e.target.value)
+                    }}
+                    onKeyDown={onRefDoorKeyDown}
                   />
                 </div>
               </>
@@ -480,7 +533,8 @@ export default function QadoqlashPage() {
 
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <InfoRow label="Acc" value={lastScan.acc_serial} mono />
-                    <InfoRow label="Eshik" value={lastScan.door_serial} mono />
+                    <InfoRow label="Freeze" value={lastScan.freeze_door_serial} mono />
+                    <InfoRow label="Ref" value={lastScan.ref_door_serial} mono />
                     <InfoRow label="Model" value={lastScan.modeli} />
                     <InfoRow label="Kompressor" value={lastScan.compressor} mono />
                     <InfoRow label="Lab model" value={lastScan.bx_model} />
@@ -528,7 +582,8 @@ export default function QadoqlashPage() {
                   <th className="px-4 py-2 font-medium">Vaqt</th>
                   <th className="px-4 py-2 font-medium">Serial</th>
                   <th className="px-4 py-2 font-medium">Acc</th>
-                  <th className="px-4 py-2 font-medium">Eshik</th>
+                  <th className="px-4 py-2 font-medium">Freeze</th>
+                  <th className="px-4 py-2 font-medium">Ref</th>
                   <th className="px-4 py-2 font-medium">Model</th>
                   <th className="w-14 px-2 py-2" />
                 </tr>
@@ -541,7 +596,8 @@ export default function QadoqlashPage() {
                       <td className="px-4 py-2 whitespace-nowrap">{row.time}</td>
                       <td className="px-4 py-2 font-mono">{row.serial}</td>
                       <td className="px-4 py-2 font-mono">{row.acc_serial}</td>
-                      <td className="px-4 py-2 font-mono">{row.door_serial}</td>
+                      <td className="px-4 py-2 font-mono">{row.freeze_door_serial}</td>
+                      <td className="px-4 py-2 font-mono">{row.ref_door_serial}</td>
                       <td className="px-4 py-2">{row.modeli}</td>
                       <td className="px-2 py-1.5 text-right">
                         <Button

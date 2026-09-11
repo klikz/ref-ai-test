@@ -26,6 +26,7 @@ const WareOutcomeDetailPage = lazy(() => import("./pages/ware_outcome_detail"))
 const WareStockSnapshotPage = lazy(() => import("./pages/ware_stock_snapshot"))
 const GsCodePgae = lazy(() => import("./pages/gscode"))
 const PrintersV2Page = lazy(() => import("./pages/printers_v2"))
+const PrintersV2MetricsPage = lazy(() => import("./pages/printers_v2_metrics"))
 const LabelTemplatesPage = lazy(() => import("./pages/label-templates"))
 const LabelTemplateEditorPage = lazy(() => import("./pages/label-template-editor"))
 const ModelsIdPage = lazy(() => import("./pages/model_id"))
@@ -53,6 +54,8 @@ const YigishPage = lazy(() => import("./pages/yigish"))
 const EshikPage = lazy(() => import("./pages/eshik"))
 const EshikProductionPage = lazy(() => import("./pages/eshik_production"))
 const QadoqlashPage = lazy(() => import("./pages/qadoqlash"))
+const MeasurementUnitsPage = lazy(() => import("./pages/measurement_units"))
+const CameraTestPage = lazy(() => import("./pages/camera_test"))
 
 export function App() {
   Global_Data.loadLocalData()
@@ -85,7 +88,11 @@ export function App() {
             <Route path="/production/balance/transactions" element={<LineBalanceTransactionsPage />} />
             <Route path="/production/product-balance" element={<ProductBalancePage />} />
             <Route path="/production/product-balance/report" element={<ProductBalanceReportPage />} />
-            <Route path="/production/line-responsibles" element={<LineResponsiblesPage />} />
+            <Route path="/production/line-responsibles" element={<Navigate to="/tools/line-responsibles" replace />} />
+            <Route path="/tools/line-responsibles" element={<LineResponsiblesPage />} />
+            <Route path="/tools/writeoff-responsibles" element={<WriteoffResponsiblesPage />} />
+            <Route path="/tools/measurement-units" element={<MeasurementUnitsPage />} />
+            <Route path="/tools/camera-test" element={<CameraTestPage />} />
             <Route path="/ombor/kirim" element={<WareIncomePage />} />
             <Route path="/ombor/buyurtma" element={<WareRequestPage />} />
             <Route path="/ombor/buyurtma/tarix" element={<WareRequestHistoryPage />} />
@@ -99,6 +106,7 @@ export function App() {
             <Route path="/gscode/report" element={<GsCodesReport />} />
             <Route path="/printers" element={<Navigate to="/printers-v2" replace />} />
             <Route path="/printers-v2" element={<PrintersV2Page />} />
+            <Route path="/printers-v2/metrics" element={<PrintersV2MetricsPage />} />
             <Route path="/label-templates" element={<LabelTemplatesPage />} />
             <Route path="/label-templates/:id" element={<LabelTemplateEditorPage />} />
             <Route path="/brigadir" element={<BrigadirPage />} />
@@ -107,7 +115,7 @@ export function App() {
             <Route path="/qadoqlash" element={<QadoqlashPage />} />
             <Route path="/production/eshik" element={<EshikProductionPage />} />
             <Route path="/writeoff" element={<WriteoffPage />} />
-            <Route path="/writeoff/responsibles" element={<WriteoffResponsiblesPage />} />
+            <Route path="/writeoff/responsibles" element={<Navigate to="/tools/writeoff-responsibles" replace />} />
             <Route path="/writeoff/approve" element={<WriteoffApprovePage />} />
             <Route path="/writeoff/records" element={<WriteoffRecordsPage />} />
             <Route path="/writeoff/:id" element={<WriteoffIdPage />} />

@@ -154,7 +154,12 @@ export function LabelPrinterPreview({
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <Printer className="size-3.5 shrink-0" />
               <span>
-                {selectedPrinter.printer_name} · {dpi} DPI · {widthMm}×{heightMm} mm
+                {selectedPrinter.printer_name} · {dpi} DPI ·{" "}
+                {preview
+                  ? `${preview.width_mm}×${preview.height_mm} mm`
+                  : printRotationDeg === 90
+                    ? `${heightMm}×${widthMm} mm (albom)`
+                    : `${widthMm}×${heightMm} mm`}
               </span>
             </div>
           ) : null}
@@ -172,10 +177,11 @@ export function LabelPrinterPreview({
                 <img
                   src={preview.preview_png}
                   alt="Etiketka ko'rinishi"
-                  className="max-h-[280px] max-w-full rounded-md border bg-white shadow-sm"
+                  className="max-h-[280px] max-w-full rounded-md border bg-white object-contain shadow-sm"
                   style={{
                     width: Math.min(preview.width_px, 360),
                     height: "auto",
+                    aspectRatio: `${preview.width_px} / ${preview.height_px}`,
                   }}
                 />
                 <p className="flex items-center gap-1 text-[10px] text-muted-foreground">

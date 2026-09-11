@@ -19,6 +19,7 @@ type FieldDef = {
   key: string
   label: string
   span?: string
+  numeric?: boolean
 }
 
 type FieldGroup = {
@@ -29,7 +30,7 @@ type FieldGroup = {
   layout?: "grid" | "serial" | "wide"
 }
 
-const multiValueKeys = new Set(["acc_serial", "compressor_serial", "door_code"])
+const multiValueKeys = new Set(["acc_serial", "compressor_serial", "freeze_door_code", "ref_door_code"])
 
 const fieldGroups: FieldGroup[] = [
   {
@@ -42,6 +43,11 @@ const fieldGroups: FieldGroup[] = [
       { key: "qisqa_nomi", label: "Qisqa nomi" },
       { key: "sovutgich_turi", label: "Sovutgich turi" },
       { key: "rangi", label: "Rangi" },
+      { key: "eshik_rangi", label: "Eshik rangi" },
+      { key: "rangi_eng", label: "Rangi (eng)" },
+      { key: "korpus_rangi_shortname", label: "Ko'rpus rangi (Shortname)" },
+      { key: "eshik_rangi_shortname", label: "Eshik rangi (Shortname)" },
+      { key: "rangi_kodi", label: "Rangi (kodi)", numeric: true },
       { key: "sotuv_turi", label: "Sotuv turi" },
       { key: "brend", label: "Brend" },
       { key: "local_export", label: "Local/Export" },
@@ -65,8 +71,12 @@ const fieldGroups: FieldGroup[] = [
         label: "kompressor_serial",
       },
       {
-        key: "door_code",
-        label: "door_code",
+        key: "freeze_door_code",
+        label: "freeze_door_code",
+      },
+      {
+        key: "ref_door_code",
+        label: "ref_door_code",
       },
     ],
   },
@@ -78,6 +88,7 @@ const fieldGroups: FieldGroup[] = [
       { key: "taminot_kuchlanishi_v", label: "Ta'minot kuchlanishi (V)" },
       { key: "elektr_toki_kuchlanishi_va_turi", label: "Elektr toki kuchlanishi va turi" },
       { key: "nominal_tok_quvvati_w", label: "Nominal tok quvvati (W)" },
+      { key: "nominal_tok_kuchi_a", label: "Nominal tok kuchi (A)" },
       { key: "yoritgich_lampaning_quvvati_vt", label: "Yoritgich lampaning quvvati (Vt)" },
       { key: "energiya_samaradorlik_sarfi", label: "Energiya samaradorlik sarfi (A+)" },
       { key: "shovqin_darajasi_db", label: "Shovqin darajasi ichki blok dB" },
@@ -121,6 +132,7 @@ const fieldGroups: FieldGroup[] = [
       { key: "ishlab_chiqaruvchi_mamlakat", label: "Ishlab chiqaruvchi mamlakat" },
       { key: "korxon_nomi", label: "Korxona nomi" },
       { key: "manzil", label: "Manzil", span: "md:col-span-2 xl:col-span-3" },
+      { key: "manzil_ru", label: "Manzil (ru)", span: "md:col-span-2 xl:col-span-3" },
     ],
   },
   {
@@ -140,6 +152,8 @@ const serialPlaceholders: Record<string, string> = {
   acc_serial: "ACC001\nACC002\n*",
   compressor_serial: "CMP001\nCMP002\n*",
   door_code: "DR01\nDR02\n*",
+  freeze_door_code: "FR01\n*",
+  ref_door_code: "RF01\n*",
 }
 
 const textareaClassName = cn(
@@ -410,7 +424,14 @@ export default function ModelsIdPage() {
                       <Label>{field.label}</Label>
                       <Input
                         value={String(model[field.key] ?? "")}
-                        onChange={(event) => updateField(field.key, event.target.value)}
+                        onChange={(event) =>
+                          updateField(
+                            field.key,
+                            field.numeric ? event.target.value.replace(/\D/g, "") : event.target.value,
+                          )
+                        }
+                        inputMode={field.numeric ? "numeric" : undefined}
+                        placeholder={field.numeric ? "faqat son" : undefined}
                         className="rounded-xl"
                       />
                     </div>

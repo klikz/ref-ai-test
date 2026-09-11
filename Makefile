@@ -1,4 +1,4 @@
-.PHONY: build buildWin run dev ui-dev routeComments install-dev
+.PHONY: build buildWin run dev ui-dev install-dev
 
 build:
 	go build -v ./cmd/api_v3
@@ -19,8 +19,5 @@ install-dev:
 # Backend (api_v3) + Vite UI in one terminal (first time: make install-dev)
 dev:
 	npm run dev
-
-routeComments:
-	go run -v ./cmd/route_comments
 
 .DEFAULT_GOAL := dev

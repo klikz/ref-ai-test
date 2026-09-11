@@ -42,6 +42,11 @@ const COLORS = {
   } as Record<number, string>,
 }
 
+const BOM_SHEET = "BOM list"
+const LINES_SHEET = "Liniyalar"
+const DATA_START_ROW = 4
+const DROPDOWN_EXTRA_ROWS = 200
+
 const HEADERS = [
   "",
   "Factory product code",
@@ -111,16 +116,93 @@ function styleDataCell(cell: ExcelJS.Cell, level: number, col: number) {
   }
 }
 
+function writeLinesSheet(workbook: ExcelJS.Workbook, lines: ConsumptionNormExportLine[]) {
+  const sheet = workbook.addWorksheet(LINES_SHEET, {
+    views: [{ state: "frozen", ySplit: 1 }],
+  })
+
+  const idHeader = sheet.getCell("A1")
+  idHeader.value = "line_id"
+  styleHeaderCell(idHeader, true)
+
+  const nameHeader = sheet.getCell("B1")
+  nameHeader.value = "liniya nomi"
+  styleHeaderCell(nameHeader, true)
+
+  lines.forEach((line, index) => {
+    const row = index + 2
+    const idCell = sheet.getCell(row, 1)
+    idCell.value = line.line_id
+    applyBorder(idCell)
+    idCell.font = { size: 10, color: { argb: "FF64748B" } }
+    idCell.alignment = { vertical: "middle", horizontal: "center" }
+    idCell.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: COLORS.linesCellBg },
+    }
+
+    const nameCell = sheet.getCell(row, 2)
+    nameCell.value = line.name
+    applyBorder(nameCell)
+    nameCell.font = { size: 10, color: { argb: "FF334155" } }
+    nameCell.alignment = { vertical: "middle", horizontal: "left" }
+    nameCell.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: COLORS.linesCellBg },
+    }
+  })
+
+  sheet.getColumn(1).width = 10
+  sheet.getColumn(2).width = 28
+  sheet.getRow(1).height = 22
+
+  return sheet
+}
+
+function applyLineDropdowns(
+  sheet: ExcelJS.Worksheet,
+  lineCount: number,
+  toRow: number,
+) {
+  if (lineCount < 1 || toRow < DATA_START_ROW) return
+
+  const listRange = `'${LINES_SHEET}'!$B$2:$B$${lineCount + 1}`
+  const validation: ExcelJS.DataValidation = {
+    type: "list",
+    allowBlank: true,
+    formulae: [listRange],
+    showErrorMessage: true,
+    errorStyle: "error",
+    errorTitle: "Noto'g'ri qiymat",
+    error: "Ro'yxatdan liniya tanlang",
+    showInputMessage: true,
+    promptTitle: "Liniya",
+    prompt: "Liniyalar sheetidan tanlang",
+  }
+
+  // exceljs runtime supports range add; types omit it
+  const validations = (sheet as ExcelJS.Worksheet & {
+    dataValidations: { add: (address: string, validation: ExcelJS.DataValidation) => void }
+  }).dataValidations
+
+  validations.add(`E${DATA_START_ROW}:E${toRow}`, validation)
+  validations.add(`F${DATA_START_ROW}:F${toRow}`, { ...validation })
+}
+
 export async function buildConsumptionNormWorkbook(
   model: ConsumptionNormExportModel,
   items: ConsumptionNormExportItem[],
   lines: ConsumptionNormExportLine[],
 ) {
   const workbook = new ExcelJS.Workbook()
-  const sheet = workbook.addWorksheet("BOM list", {
+  const sheet = workbook.addWorksheet(BOM_SHEET, {
     views: [{ state: "frozen", ySplit: 2, xSplit: 0 }],
   })
   sheet.properties.outlineProperties = { summaryBelow: false, summaryRight: false }
+
+  writeLinesSheet(workbook, lines)
 
   styleMetaCell(sheet.getCell("A1"), true)
   sheet.getCell("A1").value = "Modeli"
@@ -136,26 +218,9 @@ export async function buildConsumptionNormWorkbook(
     cell.value = header
     styleHeaderCell(cell)
   })
-  const linesHeader = sheet.getCell("J2")
-  linesHeader.value = "liniyalar nomi"
-  styleHeaderCell(linesHeader, true)
 
-  lines.forEach((line, index) => {
-    const cell = sheet.getCell(3 + index, 10)
-    cell.value = line.name
-    applyBorder(cell)
-    cell.font = { size: 10, color: { argb: "FF334155" } }
-    cell.fill = {
-      type: "pattern",
-      pattern: "solid",
-      fgColor: { argb: COLORS.linesCellBg },
-    }
-    cell.alignment = { vertical: "middle", horizontal: "left" }
-  })
-
-  const dataStartRow = 4
   items.forEach((item, index) => {
-    const rowNumber = dataStartRow + index
+    const rowNumber = DATA_START_ROW + index
     const row = sheet.getRow(rowNumber)
     row.height = 20
     row.outlineLevel = Math.max(0, Math.min(item.group_level, 7))
@@ -176,13 +241,16 @@ export async function buildConsumptionNormWorkbook(
     })
   })
 
-  const widths = [8, 28, 14, 18, 18, 18, 4, 4, 4, 16]
+  const widths = [8, 28, 14, 18, 18, 18]
   widths.forEach((width, index) => {
     sheet.getColumn(index + 1).width = width
   })
 
   sheet.getRow(1).height = 22
   sheet.getRow(2).height = 36
+
+  const dropdownToRow = Math.max(DATA_START_ROW + items.length - 1, DATA_START_ROW) + DROPDOWN_EXTRA_ROWS
+  applyLineDropdowns(sheet, lines.length, dropdownToRow)
 
   return workbook
 }
