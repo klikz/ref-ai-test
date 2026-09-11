@@ -75,6 +75,15 @@ export default function AgentPage() {
     })()
   }, [navigate])
 
+  useEffect(() => {
+    const active = tasks.some((t) => t.status === "queued" || t.status === "running")
+    if (!active || allowed !== true) return
+    const timer = window.setInterval(() => {
+      void loadTasks()
+    }, 3000)
+    return () => window.clearInterval(timer)
+  }, [tasks, allowed])
+
   async function handleCreate() {
     if (!prompt.trim()) {
       ShowErrorToast("Vazifa matnini yozing")
@@ -187,7 +196,8 @@ export default function AgentPage() {
               Vazifa yuborish
             </Button>
             <p className="text-xs text-muted-foreground">
-              Bir vaqtda bitta faol vazifa. Kod o'zgarishi git orqali; test/prod tasdiq tugmalari pastda.
+              <b>Server</b> origin: Cursor SDK worker (`ref-ai-agent-worker`) avtomatik bajaradi.
+              <b> PC</b>: Cursor IDE da qo&apos;lda. Bir vaqtda bitta faol (queued/running) vazifa.
             </p>
           </div>
         </Panel>

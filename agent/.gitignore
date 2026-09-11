@@ -1,0 +1,7 @@
+# Cursor SDK agent worker — local files / secrets
+.env
+.env.*
+!.env.example
+node_modules/
+.run/
+*.log

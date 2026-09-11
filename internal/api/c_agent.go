@@ -87,15 +87,30 @@ func (s *ServerModel) AgentTasksCreate(c *gin.Context) {
 		s.Utils.SendError(c, err, "AgentTasksCreate", "")
 		return
 	}
-	// MVP: server origin tasks wait for manual Cursor/worker; mark ready_for_test with instruction.
-	logMsg := "Vazifa yaratildi. PC dan Cursor orqali bajaring yoki server agent worker ishga tushiring, keyin testga chiqaring."
 	if origin == "pc" {
-		logMsg = "PC vazifasi qabul qilindi. Kodni commit/push qiling, keyin testga chiqaring."
-	}
-	item, err = s.Store.Repo().AgentTaskUpdateStatus(item.ID, "ready_for_test", logMsg, "", "")
-	if err != nil {
-		s.Utils.SendError(c, err, "AgentTasksCreate: status", "")
-		return
+		item, err = s.Store.Repo().AgentTaskUpdateStatus(
+			item.ID,
+			"ready_for_test",
+			"PC vazifasi qabul qilindi. Cursor da bajaring, commit/push qiling, keyin testga chiqaring.",
+			"",
+			"",
+		)
+		if err != nil {
+			s.Utils.SendError(c, err, "AgentTasksCreate: status", "")
+			return
+		}
+	} else {
+		item, err = s.Store.Repo().AgentTaskUpdateStatus(
+			item.ID,
+			"queued",
+			"Navbatda. Cursor SDK worker (ref-ai-agent-worker) olib bajaradi.",
+			"",
+			"",
+		)
+		if err != nil {
+			s.Utils.SendError(c, err, "AgentTasksCreate: queued", "")
+			return
+		}
 	}
 	s.Utils.SendOK(c, item)
 }

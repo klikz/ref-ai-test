@@ -92,6 +92,52 @@ func (r *Repo) AgentTaskCreate(prompt, origin string, createdBy int) (models.Age
 	return item, err
 }
 
+func (r *Repo) AgentTaskClaimNext() (models.AgentTask, error) {
+	tx, err := r.store.db.Begin()
+	if err != nil {
+		return models.AgentTask{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	item := models.AgentTask{}
+	err = tx.QueryRow(`
+		SELECT id, prompt, origin, status, created_by, git_sha, log_text, error_text, created_at, updated_at
+		FROM agent.tasks
+		WHERE status = 'queued' AND origin = 'server'
+		ORDER BY id ASC
+		FOR UPDATE SKIP LOCKED
+		LIMIT 1
+	`).Scan(
+		&item.ID, &item.Prompt, &item.Origin, &item.Status, &item.CreatedBy,
+		&item.GitSHA, &item.LogText, &item.ErrorText, &item.CreatedAt, &item.UpdatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return models.AgentTask{}, sql.ErrNoRows
+	}
+	if err != nil {
+		return models.AgentTask{}, err
+	}
+
+	err = tx.QueryRow(`
+		UPDATE agent.tasks
+		SET status = 'running',
+		    log_text = 'Cursor SDK worker ishlamoqda...',
+		    updated_at = $2
+		WHERE id = $1
+		RETURNING id, prompt, origin, status, created_by, git_sha, log_text, error_text, created_at, updated_at
+	`, item.ID, time.Now()).Scan(
+		&item.ID, &item.Prompt, &item.Origin, &item.Status, &item.CreatedBy,
+		&item.GitSHA, &item.LogText, &item.ErrorText, &item.CreatedAt, &item.UpdatedAt,
+	)
+	if err != nil {
+		return models.AgentTask{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return models.AgentTask{}, err
+	}
+	return item, nil
+}
+
 func (r *Repo) AgentTaskUpdateStatus(id int64, status, logText, errorText, gitSHA string) (models.AgentTask, error) {
 	item := models.AgentTask{}
 	err := r.store.db.QueryRow(`
