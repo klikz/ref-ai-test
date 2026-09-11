@@ -76,7 +76,9 @@ export default function AgentPage() {
   }, [navigate])
 
   useEffect(() => {
-    const active = tasks.some((t) => t.status === "queued" || t.status === "running")
+    const active = tasks.some(
+      (t) => t.status === "queued" || t.status === "running" || t.status === "testing",
+    )
     if (!active || allowed !== true) return
     const timer = window.setInterval(() => {
       void loadTasks()
@@ -110,7 +112,7 @@ export default function AgentPage() {
       ShowErrorToast(result.error || "Test tasdiqlanmadi")
       return
     }
-    ShowOKToast("Testga chiqarish tasdiqlandi")
+    ShowOKToast("Test deploy boshlandi (build/pm2)")
     await loadTasks()
   }
 
@@ -197,7 +199,7 @@ export default function AgentPage() {
             </Button>
             <p className="text-xs text-muted-foreground">
               <b>Server</b> origin: Cursor SDK worker (`ref-ai-agent-worker`) avtomatik bajaradi.
-              <b> PC</b>: Cursor IDE da qo&apos;lda. Bir vaqtda bitta faol (queued/running) vazifa.
+              <b> PC</b>: Cursor IDE da qo&apos;lda. Bir vaqtda bitta faol (queued/running/testing) vazifa.
             </p>
           </div>
         </Panel>
@@ -242,6 +244,12 @@ export default function AgentPage() {
                       </TableCell>
                       <TableCell>
                         <div className="flex flex-wrap gap-1">
+                          {task.status === "testing" && (
+                            <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                              <Loader2 className="size-3.5 animate-spin" />
+                              Deploy...
+                            </span>
+                          )}
                           {(task.status === "ready_for_test" || task.status === "failed") && (
                             <Button
                               size="sm"
@@ -288,7 +296,7 @@ export default function AgentPage() {
             <li>Kodni gitga push qiling (Cursor / worker).</li>
             <li>
               <Bot className="mr-1 inline size-3.5" />
-              Testga — serverda pull/build/restart qiling.
+              Testga — avtomatik: git/build/copy/pm2 restart.
             </li>
             <li>Test OK bo'lsa — Prodga tasdiqlang.</li>
           </ol>

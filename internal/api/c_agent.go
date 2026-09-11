@@ -1,8 +1,11 @@
 package api
 
 import (
+	"bytes"
 	"errors"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -45,6 +48,111 @@ func (s *ServerModel) agentRequireOwner(c *gin.Context) bool {
 		return false
 	}
 	return true
+}
+
+func agentAppDir() string {
+	if v := strings.TrimSpace(os.Getenv("AGENT_APP_DIR")); v != "" {
+		return v
+	}
+	// Common layout: <root>/bin/api_v3.exe and <root>/app/...
+	cwd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	candidate := filepath.Join(cwd, "app")
+	if st, err := os.Stat(filepath.Join(candidate, "scripts", "agent-deploy-test.ps1")); err == nil && !st.IsDir() {
+		return candidate
+	}
+	if st, err := os.Stat(filepath.Join(cwd, "scripts", "agent-deploy-test.ps1")); err == nil && !st.IsDir() {
+		return cwd
+	}
+	return cwd
+}
+
+func (s *ServerModel) agentRunDeployTest(taskID int64) {
+	appDir := agentAppDir()
+	script := filepath.Join(appDir, "scripts", "agent-deploy-test.ps1")
+	_, _ = s.Store.Repo().AgentTaskUpdateStatus(
+		taskID,
+		"testing",
+		"Test deploy boshlandi: git/build/pm2...\nappDir="+appDir,
+		"",
+		"",
+	)
+
+	if _, err := os.Stat(script); err != nil {
+		_, _ = s.Store.Repo().AgentTaskUpdateStatus(
+			taskID,
+			"failed",
+			"",
+			"deploy script topilmadi: "+script,
+			"",
+		)
+		return
+	}
+
+	cmd := exec.Command(
+		"powershell.exe",
+		"-NoProfile",
+		"-ExecutionPolicy", "Bypass",
+		"-File", script,
+	)
+	cmd.Dir = appDir
+	cmd.Env = append(os.Environ(),
+		"AGENT_APP_DIR="+appDir,
+		"AGENT_TASK_ID="+strconv.FormatInt(taskID, 10),
+		// Status DB ga yozilguncha process o'lmasin — pm2 ni Go keyin ishga tushiradi.
+		"AGENT_SKIP_PM2=1",
+	)
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+
+	err := cmd.Run()
+	out := buf.String()
+	if len(out) > 6000 {
+		out = out[len(out)-6000:]
+	}
+	if err != nil {
+		_, _ = s.Store.Repo().AgentTaskUpdateStatus(
+			taskID,
+			"failed",
+			out,
+			"Test deploy xato: "+err.Error(),
+			"",
+		)
+		return
+	}
+
+	pm2Name := strings.TrimSpace(os.Getenv("PM2_TEST_NAME"))
+	if pm2Name == "" {
+		pm2Name = "ref-ai-test"
+	}
+
+	// Avval DB status — keyin pm2 (restart processni o'ldiradi).
+	_, _ = s.Store.Repo().AgentTaskUpdateStatus(
+		taskID,
+		"ready_for_prod",
+		"Test deploy OK (pm2 restart...).\n"+out+"\nEndi Prodga tugmasini bosishingiz mumkin.",
+		"",
+		"",
+	)
+
+	pm2Out, pm2Err := exec.Command("pm2", "restart", pm2Name, "--update-env").CombinedOutput()
+	if pm2Err != nil {
+		msg := out + "\npm2 restart:\n" + string(pm2Out)
+		if len(msg) > 6000 {
+			msg = msg[len(msg)-6000:]
+		}
+		_, _ = s.Store.Repo().AgentTaskUpdateStatus(
+			taskID,
+			"failed",
+			msg,
+			"Build OK, lekin pm2 restart xato: "+pm2Err.Error(),
+			"",
+		)
+		return
+	}
 }
 
 func (s *ServerModel) AgentAccess(c *gin.Context) {
@@ -160,17 +268,21 @@ func (s *ServerModel) AgentTasksApproveTest(c *gin.Context) {
 		s.Utils.SendError(c, errors.New("vazifa testga chiqarish holatida emas"), "AgentTasksApproveTest", item)
 		return
 	}
+
 	item, err = s.Store.Repo().AgentTaskUpdateStatus(
 		id,
-		"ready_for_prod",
-		"Test tasdiqlandi. Serverda: git pull → build → pm2 restart ref-ai-test, keyin prodga chiqaring.",
+		"testing",
+		"Test deploy navbatga qo'yildi (git/build/pm2)...",
 		"",
 		"",
 	)
 	if err != nil {
-		s.Utils.SendError(c, err, "AgentTasksApproveTest", "")
+		s.Utils.SendError(c, err, "AgentTasksApproveTest: testing", "")
 		return
 	}
+
+	go s.agentRunDeployTest(id)
+
 	s.Utils.SendOK(c, item)
 }
 
