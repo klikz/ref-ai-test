@@ -11,6 +11,7 @@ class StoreDatas{
     name: string = "";
     role: string = "";
     role_id: number | null = null;
+    agentAllowed: boolean = false;
 
     setAccessToken(accessToken: string) {
         this.accessToken = accessToken;
@@ -32,8 +33,21 @@ class StoreDatas{
         return this.role.toLowerCase() === "admin";
     }
 
-    visibleNavSections<T extends { adminOnly?: boolean }>(sections: T[]): T[] {
-        return sections.filter((section) => !section.adminOnly || this.isAdmin());
+    setAgentAllowed(allowed: boolean) {
+        this.agentAllowed = allowed;
+        localStorage.setItem("agentAllowed", String(allowed));
+    }
+
+    isAgentOwner() {
+        return this.agentAllowed;
+    }
+
+    visibleNavSections<T extends { adminOnly?: boolean; agentOwnerOnly?: boolean }>(sections: T[]): T[] {
+        return sections.filter((section) => {
+            if (section.adminOnly && !this.isAdmin()) return false;
+            if (section.agentOwnerOnly && !this.isAgentOwner()) return false;
+            return true;
+        });
     }
 
     loadLocalData(){
@@ -45,6 +59,7 @@ class StoreDatas{
         this.login = localStorage.getItem("login") || "";
         this.name = localStorage.getItem("name") || "";
         this.role_id = Number(localStorage.getItem("role_id")) || null;
+        this.agentAllowed = localStorage.getItem("agentAllowed") === "true";
     }
 
     setUserData(isAuth: boolean, accessToken: string, role: string, id: number, 
@@ -73,6 +88,7 @@ class StoreDatas{
         this.login = "";
         this.name = "";
         this.role_id = null;
+        this.agentAllowed = false;
         localStorage.removeItem("isauth");
         localStorage.removeItem("accessToken");
         localStorage.removeItem("role");
@@ -80,6 +96,7 @@ class StoreDatas{
         localStorage.removeItem("login");
         localStorage.removeItem("name");
         localStorage.removeItem("role_id");
+        localStorage.removeItem("agentAllowed");
     }
 } 
 

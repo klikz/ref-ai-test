@@ -172,4 +172,13 @@ func (s *ServerModel) Routes() {
 	api.POST("/writeoff/catalog/lines", s.WriteoffCatalogLines)
 	api.POST("/writeoff/catalog/items", s.WriteoffCatalogItems)
 	api.POST("/writeoff/is-responsible", s.WriteoffIsResponsible)
+
+	// AGENT (owner allowlist via AGENT_OWNER_USER_IDS)
+	api.POST("/agent/access", s.AgentAccess)
+	api.POST("/agent/tasks", s.AgentTasksList)
+	api.POST("/agent/tasks/create", s.AgentTasksCreate)
+	api.POST("/agent/tasks/get", s.AgentTasksGet)
+	api.POST("/agent/tasks/approve-test", s.AgentTasksApproveTest)
+	api.POST("/agent/tasks/approve-prod", s.AgentTasksApproveProd)
+	api.POST("/agent/tasks/reject", s.AgentTasksReject)
 }

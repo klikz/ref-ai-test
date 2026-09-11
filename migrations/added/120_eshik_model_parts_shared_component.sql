@@ -1,6 +1,6 @@
 -- Allow one component to be used across multiple eshik models
 -- Apply:
---   psql "host=localhost dbname=ac2 user=postgres password=postgres sslmode=disable" -f migrations/added/120_eshik_model_parts_shared_component.sql
+--   psql "host=localhost dbname=ac2 user=postgres password=postgres sslmode=disable" -f migrations/120_eshik_model_parts_shared_component.sql
 
 BEGIN;
 

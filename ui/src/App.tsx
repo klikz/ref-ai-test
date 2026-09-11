@@ -56,6 +56,7 @@ const EshikProductionPage = lazy(() => import("./pages/eshik_production"))
 const QadoqlashPage = lazy(() => import("./pages/qadoqlash"))
 const MeasurementUnitsPage = lazy(() => import("./pages/measurement_units"))
 const CameraTestPage = lazy(() => import("./pages/camera_test"))
+const AgentPage = lazy(() => import("./pages/agent"))
 
 export function App() {
   Global_Data.loadLocalData()
@@ -93,6 +94,7 @@ export function App() {
             <Route path="/tools/writeoff-responsibles" element={<WriteoffResponsiblesPage />} />
             <Route path="/tools/measurement-units" element={<MeasurementUnitsPage />} />
             <Route path="/tools/camera-test" element={<CameraTestPage />} />
+            <Route path="/agent" element={<AgentPage />} />
             <Route path="/ombor/kirim" element={<WareIncomePage />} />
             <Route path="/ombor/buyurtma" element={<WareRequestPage />} />
             <Route path="/ombor/buyurtma/tarix" element={<WareRequestHistoryPage />} />

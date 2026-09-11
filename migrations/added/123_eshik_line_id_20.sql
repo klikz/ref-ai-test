@@ -2,7 +2,7 @@
 -- 11 stays "Eshiklarni kesish va formalash uchastkasi" (catalog)
 -- 20 is "Eshik yig'uv va eshikka PPU quyish uchastkasi" (print/plan/balance)
 -- Apply:
---   psql "host=localhost dbname=ac2 user=postgres password=postgres sslmode=disable" -f migrations/added/123_eshik_line_id_20.sql
+--   psql "host=localhost dbname=ac2 user=postgres password=postgres sslmode=disable" -f migrations/123_eshik_line_id_20.sql
 
 BEGIN;
 

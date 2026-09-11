@@ -1,6 +1,6 @@
 -- Eshik: model + freeze/ref parts (prefix, indexes, balance components)
 -- Apply:
---   psql "host=localhost dbname=ac2 user=postgres password=postgres sslmode=disable" -f migrations/added/116_eshik_models.sql
+--   psql "host=localhost dbname=ac2 user=postgres password=postgres sslmode=disable" -f migrations/116_eshik_models.sql
 
 BEGIN;
 

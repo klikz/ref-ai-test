@@ -1,7 +1,7 @@
 -- Split models.door_code into freeze_door_code + ref_door_code;
 -- qadoqlash stores both scanned door serials.
 -- Apply:
---   psql "host=localhost dbname=ac2 user=postgres password=postgres sslmode=disable" -f migrations/added/117_model_door_codes.sql
+--   psql "host=localhost dbname=ac2 user=postgres password=postgres sslmode=disable" -f migrations/117_model_door_codes.sql
 
 BEGIN;
 

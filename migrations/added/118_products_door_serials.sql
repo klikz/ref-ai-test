@@ -1,7 +1,7 @@
 -- Add freeze/ref door serials on lines.products (chiqgan mahsulotlar).
 -- Packing (qadoqlash) scan success updates these by product serial.
 -- Apply:
---   psql "host=localhost dbname=ac2 user=postgres password=postgres sslmode=disable" -f migrations/added/118_products_door_serials.sql
+--   psql "host=localhost dbname=ac2 user=postgres password=postgres sslmode=disable" -f migrations/118_products_door_serials.sql
 
 BEGIN;
 

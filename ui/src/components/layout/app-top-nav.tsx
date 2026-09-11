@@ -1,5 +1,6 @@
 import { Link, useLocation } from "react-router-dom"
 import { ChevronDown, LogOut, Menu, Moon, Snowflake, Sun } from "lucide-react"
+import { useEffect, useState } from "react"
 import { cn } from "@/lib/utils"
 import { Global_Data } from "@/config/config"
 import { navSections } from "@/lib/nav-config"
@@ -14,13 +15,30 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { useTheme } from "@/components/theme-provider"
+import { Backend_Request } from "@/services/backend"
 
 export function AppTopNav() {
   const location = useLocation()
   const login = Global_Data.getLogin()
   const name = localStorage.getItem("name") || ""
   const { theme, setTheme } = useTheme()
+  const [navTick, setNavTick] = useState(0)
   const visibleNavSections = Global_Data.visibleNavSections(navSections)
+
+  useEffect(() => {
+    void (async () => {
+      const result = await Backend_Request<{ allowed: boolean }>({}, "/api/agent/access")
+      if (result.result === "ok") {
+        Global_Data.setAgentAllowed(Boolean(result.data?.allowed))
+      } else {
+        Global_Data.setAgentAllowed(false)
+      }
+      setNavTick((v) => v + 1)
+    })()
+  }, [])
+
+  // re-read after agent access resolves
+  void navTick
 
   async function handleLogout() {
     localStorage.removeItem("token")

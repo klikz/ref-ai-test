@@ -1,6 +1,6 @@
 -- Rename existing workshop lines + add new uchastka names (catalog only)
 -- Apply:
---   psql "host=localhost dbname=ac2 user=postgres password=postgres sslmode=disable" -f migrations/added/121_lines_uchastka_names.sql
+--   psql "host=localhost dbname=ac2 user=postgres password=postgres sslmode=disable" -f migrations/121_lines_uchastka_names.sql
 
 BEGIN;
 

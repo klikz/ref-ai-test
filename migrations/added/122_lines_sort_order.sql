@@ -1,6 +1,6 @@
 -- Line display order + new "Eshik yig'uv va eshikka PPU quyish" uchastka
 -- Apply:
---   psql "host=localhost dbname=ac2 user=postgres password=postgres sslmode=disable" -f migrations/added/122_lines_sort_order.sql
+--   psql "host=localhost dbname=ac2 user=postgres password=postgres sslmode=disable" -f migrations/122_lines_sort_order.sql
 
 BEGIN;
 

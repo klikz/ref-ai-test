@@ -25,6 +25,7 @@ import {
   Warehouse,
   Ruler,
   Camera,
+  Bot,
 } from "lucide-react"
 
 export type NavItem = {
@@ -38,6 +39,7 @@ export type NavSection = {
   label: string
   items: NavItem[]
   adminOnly?: boolean
+  agentOwnerOnly?: boolean
 }
 
 export const navSections: NavSection[] = [
@@ -117,6 +119,18 @@ export const navSections: NavSection[] = [
     adminOnly: true,
     items: [
       { title: "Foydalanuvchilar", href: "/users", icon: Users },
+    ],
+  },
+  {
+    label: "Agent",
+    agentOwnerOnly: true,
+    items: [
+      {
+        title: "Vazifalar",
+        href: "/agent",
+        icon: Bot,
+        description: "AI vazifa, test/prod tasdiq (faqat egasi)",
+      },
     ],
   },
 ]
