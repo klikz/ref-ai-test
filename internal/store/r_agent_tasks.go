@@ -144,7 +144,7 @@ func (r *Repo) AgentTaskUpdateStatus(id int64, status, logText, errorText, gitSH
 		UPDATE agent.tasks
 		SET status = $2,
 		    log_text = CASE WHEN $3 = '' THEN log_text ELSE $3 END,
-		    error_text = CASE WHEN $4 = '' THEN error_text ELSE $4 END,
+		    error_text = $4,
 		    git_sha = CASE WHEN $5 = '' THEN git_sha ELSE $5 END,
 		    updated_at = $6
 		WHERE id = $1

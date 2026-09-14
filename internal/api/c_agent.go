@@ -69,6 +69,51 @@ func agentAppDir() string {
 	return cwd
 }
 
+func agentBinaryName() string {
+	if v := strings.TrimSpace(os.Getenv("APP_BINARY")); v != "" {
+		return v
+	}
+	return "api_v3.exe"
+}
+
+// agentRootFromAppDir: layout is <root>/bin + <root>/app/...
+func agentRootFromAppDir(appDir string) string {
+	base := filepath.Base(appDir)
+	if strings.EqualFold(base, "app") {
+		return filepath.Dir(appDir)
+	}
+	return appDir
+}
+
+// agentSwapNewBinary renames bin/api_v3.exe.new -> api_v3.exe if present.
+func agentSwapNewBinary(rootDir string) error {
+	bin := agentBinaryName()
+	newer := filepath.Join(rootDir, "bin", bin+".new")
+	dest := filepath.Join(rootDir, "bin", bin)
+	if _, err := os.Stat(newer); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	_ = os.Remove(dest)
+	return os.Rename(newer, dest)
+}
+
+// agentPm2RestartClean restarts without --update-env so caller env
+// (e.g. test PORT=3081) cannot override the target app's .env.
+func agentPm2RestartClean(name string) (string, error) {
+	out, err := exec.Command("pm2", "restart", name).CombinedOutput()
+	return string(out), err
+}
+
+func agentPm2StartEco(prodDir, eco string) (string, error) {
+	cmd := exec.Command("pm2", "start", eco)
+	cmd.Dir = prodDir
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
 func (s *ServerModel) agentRunDeployTest(taskID int64) {
 	appDir := agentAppDir()
 	script := filepath.Join(appDir, "scripts", "agent-deploy-test.ps1")
@@ -131,19 +176,32 @@ func (s *ServerModel) agentRunDeployTest(taskID int64) {
 	if pm2Name == "" {
 		pm2Name = "ref-ai-test"
 	}
+	rootDir := agentRootFromAppDir(appDir)
 
-	// Avval DB status — keyin pm2 (restart processni o'ldiradi).
+	// Avval DB status — keyin stop/swap/restart (restart processni o'ldiradi).
 	_, _ = s.Store.Repo().AgentTaskUpdateStatus(
 		taskID,
 		"ready_for_prod",
-		"Test deploy OK (pm2 restart...).\n"+out+"\nEndi Prodga tugmasini bosishingiz mumkin.",
+		"Test deploy OK (pm2 swap+restart...).\n"+out+"\nEndi Prodga tugmasini bosishingiz mumkin.",
 		"",
 		"",
 	)
 
-	pm2Out, pm2Err := exec.Command("pm2", "restart", pm2Name, "--update-env").CombinedOutput()
+	_, _ = exec.Command("pm2", "stop", pm2Name).CombinedOutput()
+	if swapErr := agentSwapNewBinary(rootDir); swapErr != nil {
+		_, _ = s.Store.Repo().AgentTaskUpdateStatus(
+			taskID,
+			"failed",
+			out,
+			"Build OK, lekin binary swap xato: "+swapErr.Error(),
+			"",
+		)
+		return
+	}
+	// No --update-env: keep PORT/CONN_STRING from the test app .env.
+	pm2Out, pm2Err := agentPm2RestartClean(pm2Name)
 	if pm2Err != nil {
-		msg := out + "\npm2 restart:\n" + string(pm2Out)
+		msg := out + "\npm2 restart:\n" + pm2Out
 		if len(msg) > 6000 {
 			msg = msg[len(msg)-6000:]
 		}
@@ -304,7 +362,7 @@ func (s *ServerModel) agentRunDeployProd(taskID int64) {
 	_, _ = s.Store.Repo().AgentTaskUpdateStatus(
 		taskID,
 		"promoting",
-		"Prod deploy: test artifaktlari → "+prodDir,
+		"Prod deploy: test artifaktlari -> "+prodDir,
 		"",
 		"",
 	)
@@ -367,14 +425,13 @@ func (s *ServerModel) agentRunDeployProd(taskID int64) {
 		"",
 	)
 
-	// Prefer restart; if app missing, start from ecosystem in prod dir.
-	pm2Out, pm2Err := exec.Command("pm2", "restart", pm2Name, "--update-env").CombinedOutput()
+	// Script already stopped prod to unlock the exe. Restart WITHOUT --update-env
+	// so test API env (PORT=3081, dbname=ref-test) cannot leak into prod.
+	pm2Out, pm2Err := agentPm2RestartClean(pm2Name)
 	if pm2Err != nil {
 		eco := filepath.Join(prodDir, "ecosystem.config.cjs")
-		start := exec.Command("pm2", "start", eco)
-		start.Dir = prodDir
-		startOut, startErr := start.CombinedOutput()
-		msg := out + "\npm2 restart:\n" + string(pm2Out) + "\npm2 start:\n" + string(startOut)
+		startOut, startErr := agentPm2StartEco(prodDir, eco)
+		msg := out + "\npm2 restart:\n" + pm2Out + "\npm2 start:\n" + startOut
 		if len(msg) > 6000 {
 			msg = msg[len(msg)-6000:]
 		}
